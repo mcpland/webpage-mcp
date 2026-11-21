@@ -194,6 +194,65 @@ describe('screenshotTool', () => {
     vi.doUnmock('@/utils/image-utils');
   });
 
+  async function loadWithFittingCompression() {
+    const compressImage = vi.fn(async (_dataUrl: string, options: any) => ({
+      dataUrl: 'data:image/jpeg;base64,QUJD',
+      mimeType: 'image/jpeg',
+      width: options.fitWithin?.width ?? 1,
+      height: options.fitWithin?.height ?? 1,
+    }));
+    vi.doMock('@/utils/image-utils', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('@/utils/image-utils')>()),
+      compressImage,
+    }));
+    const tool = await loadScreenshotTool();
+    const context = await import('@/utils/screenshot-context');
+    return { ...tool, compressImage, context };
+  }
+
+  it('sizes inline viewport screenshots in CSS pixels so coordinates map 1:1', async () => {
+    const { screenshotTool, compressImage, context } = await loadWithFittingCompression();
+    (chrome.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeTab());
+
+    const result = await screenshotTool.execute({ tabId: 7, background: true });
+
+    expect(result.isError).toBe(false);
+    expect(compressImage.mock.calls[0][1]).toMatchObject({ fitWithin: { width: 1280, height: 720 } });
+    const ctx = context.screenshotContextManager.getContext(7)!;
+    expect(ctx).toMatchObject({
+      screenshotWidth: 1280,
+      screenshotHeight: 720,
+      viewportWidth: 1280,
+      viewportHeight: 720,
+    });
+    expect(context.scaleCoordinates(640, 360, ctx)).toEqual({ x: 640, y: 360 });
+    vi.doUnmock('@/utils/image-utils');
+  });
+
+  it('records the delivered size when a wide viewport is downscaled', async () => {
+    cdpMocks.sendCommand.mockImplementation(async (_tabId, method) => {
+      if (method === 'Page.getLayoutMetrics') {
+        return { layoutViewport: { clientWidth: 2560, clientHeight: 1440 } };
+      }
+      if (method === 'Page.captureScreenshot') {
+        return {
+          data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tmS0AAAAASUVORK5CYII=',
+        };
+      }
+      if (method === 'Runtime.evaluate') return { result: { value: 1 } };
+      return undefined;
+    });
+    const { screenshotTool, context } = await loadWithFittingCompression();
+    (chrome.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeTab());
+
+    await screenshotTool.execute({ tabId: 7, background: true });
+
+    const ctx = context.screenshotContextManager.getContext(7)!;
+    expect(ctx).toMatchObject({ screenshotWidth: 1568, screenshotHeight: 882, viewportWidth: 2560 });
+    expect(context.scaleCoordinates(784, 441, ctx)).toEqual({ x: 1280, y: 720 });
+    vi.doUnmock('@/utils/image-utils');
+  });
+
   it('rejects background full-page captures before using visible-tab capture', async () => {
     const { screenshotTool } = await loadScreenshotTool();
     const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;

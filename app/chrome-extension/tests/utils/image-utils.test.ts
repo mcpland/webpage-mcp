@@ -111,6 +111,33 @@ describe('bounded image utilities', () => {
     expect(bitmap.close).toHaveBeenCalledOnce();
   });
 
+  it('downscales to fit bounds and reports the delivered size', async () => {
+    context.drawImage.mockImplementation(() => {
+      throw new Error('stop after sizing');
+    });
+    await expect(
+      compressImage(SMALL_DATA_URL, { fitWithin: { width: 50, height: 80 } }),
+    ).rejects.toThrow('stop after sizing');
+    // 100x100 fitted within 50x80 keeps the aspect ratio: 50x50.
+    expect(canvasConstructor).toHaveBeenCalledWith(50, 50);
+  });
+
+  it('never upscales when the bounds exceed the source', async () => {
+    context.drawImage.mockImplementation(() => {
+      throw new Error('stop after sizing');
+    });
+    await expect(
+      compressImage(SMALL_DATA_URL, { fitWithin: { width: 400, height: 400 } }),
+    ).rejects.toThrow('stop after sizing');
+    expect(canvasConstructor).toHaveBeenCalledWith(100, 100);
+  });
+
+  it('rejects invalid fit bounds', async () => {
+    await expect(
+      compressImage(SMALL_DATA_URL, { fitWithin: { width: 0, height: 10 } }),
+    ).rejects.toThrow('Image compression bounds must be positive finite dimensions.');
+  });
+
   it('closes the compression bitmap when drawing fails', async () => {
     context.drawImage.mockImplementation(() => {
       throw new Error('compression draw failed');

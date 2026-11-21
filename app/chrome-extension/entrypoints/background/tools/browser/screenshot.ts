@@ -95,6 +95,18 @@ const PAGE_DETAILS_REQUIRED_FIELDS: Array<keyof ScreenshotPageDetails> = [
   'currentScrollY',
 ];
 
+// Long-edge cap for inline viewport screenshots. Claude downsizes larger images
+// anyway, which would silently change the coordinate space the model sees.
+const INLINE_SCREENSHOT_MAX_EDGE = 1568;
+
+function fitInlineScreenshot(cssWidth: number, cssHeight: number): { width: number; height: number } {
+  const factor = Math.min(1, INLINE_SCREENSHOT_MAX_EDGE / Math.max(cssWidth, cssHeight, 1));
+  return {
+    width: Math.max(1, Math.round(cssWidth * factor)),
+    height: Math.max(1, Math.round(cssHeight * factor)),
+  };
+}
+
 const BACKGROUND_SCREENSHOT_UNSUPPORTED_ERROR =
   'Background screenshots support only viewport capture. fullPage and selector captures require foreground capture because Chrome captureVisibleTab captures the active visible tab.';
 
@@ -390,30 +402,6 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       assertScreenshotDataUrl(finalImageDataUrl, 'Final screenshot data URL');
 
       // 2. Process output
-      // Update screenshot context for coordinate scaling by tools like chrome_computer
-      try {
-        if (typeof finalImageWidthCss === 'number' && typeof finalImageHeightCss === 'number') {
-          let hostname = '';
-          try {
-            hostname = tab.url ? new URL(tab.url).hostname : '';
-          } catch {
-            // ignore
-          }
-          // Use pageDetails if available, otherwise fall back to final image dimensions
-          const viewportWidth = pageDetails?.viewportWidth ?? finalImageWidthCss;
-          const viewportHeight = pageDetails?.viewportHeight ?? finalImageHeightCss;
-          screenshotContextManager.setContext(tab.id!, {
-            screenshotWidth: finalImageWidthCss,
-            screenshotHeight: finalImageHeightCss,
-            viewportWidth,
-            viewportHeight,
-            devicePixelRatio: pageDetails?.devicePixelRatio,
-            hostname,
-          });
-        }
-      } catch (e) {
-        console.warn('Failed to set screenshot context:', e);
-      }
       if (savePng === true) {
         // Save PNG file to downloads
         this.logInfo('Saving PNG...');
@@ -438,11 +426,18 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         }
       }
 
+      const viewportCapture = !fullPage && !selector;
       if (storeBase64) {
         // Inline images are delivered as MCP image content so clients can show
-        // them to the model; JPEG at 70% scale keeps the payload small.
+        // them to the model. Viewport captures are sized in CSS pixels so a
+        // point read off the image is the same viewport coordinate that
+        // chrome_read_page reports; only very wide viewports are downscaled.
         const compressed = await compressImage(finalImageDataUrl, {
-          scale: 0.7,
+          ...(viewportCapture &&
+          typeof finalImageWidthCss === 'number' &&
+          typeof finalImageHeightCss === 'number'
+            ? { fitWithin: fitInlineScreenshot(finalImageWidthCss, finalImageHeightCss) }
+            : { scale: 0.7 }),
           quality: 0.8,
           format: 'image/jpeg',
         });
@@ -452,6 +447,39 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           width: compressed.width,
           height: compressed.height,
         };
+      }
+
+      // chrome_computer maps screenshot-space coordinates back to the viewport
+      // through this context, so it must describe the image the caller got.
+      // Full-page and element images do not share the viewport's coordinate
+      // space; their context is cleared so later coordinates stay viewport-based.
+      try {
+        if (
+          viewportCapture &&
+          typeof finalImageWidthCss === 'number' &&
+          typeof finalImageHeightCss === 'number'
+        ) {
+          let hostname = '';
+          try {
+            hostname = tab.url ? new URL(tab.url).hostname : '';
+          } catch {
+            // ignore
+          }
+          const viewportWidth = pageDetails?.viewportWidth ?? finalImageWidthCss;
+          const viewportHeight = pageDetails?.viewportHeight ?? finalImageHeightCss;
+          screenshotContextManager.setContext(tab.id!, {
+            screenshotWidth: image ? image.width : finalImageWidthCss,
+            screenshotHeight: image ? image.height : finalImageHeightCss,
+            viewportWidth,
+            viewportHeight,
+            devicePixelRatio: pageDetails?.devicePixelRatio,
+            hostname,
+          });
+        } else {
+          screenshotContextManager.clear(tab.id!);
+        }
+      } catch (e) {
+        console.warn('Failed to set screenshot context:', e);
       }
     } catch (error) {
       console.error('Error during screenshot execution:', error);

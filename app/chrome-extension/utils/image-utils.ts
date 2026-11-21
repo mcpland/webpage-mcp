@@ -291,13 +291,26 @@ export async function compressImage(
   imageDataUrl: string,
   options: {
     scale?: number;
+    /** Downscale (never upscale) so the result fits within these pixel dimensions. */
+    fitWithin?: { width: number; height: number };
     quality?: number;
     format?: 'image/jpeg' | 'image/webp';
   },
 ): Promise<{ dataUrl: string; mimeType: string; width: number; height: number }> {
-  const { scale = 1.0, quality = 0.8, format = 'image/jpeg' } = options;
+  const { scale = 1.0, fitWithin, quality = 0.8, format = 'image/jpeg' } = options;
   if (!Number.isFinite(scale) || scale <= 0 || scale > 1) {
     throw new Error('Image compression scale must be greater than 0 and no more than 1.');
+  }
+  if (
+    fitWithin &&
+    !(
+      Number.isFinite(fitWithin.width) &&
+      Number.isFinite(fitWithin.height) &&
+      fitWithin.width > 0 &&
+      fitWithin.height > 0
+    )
+  ) {
+    throw new Error('Image compression bounds must be positive finite dimensions.');
   }
   if (!Number.isFinite(quality) || quality < 0 || quality > 1) {
     throw new Error('Image compression quality must be between 0 and 1.');
@@ -306,8 +319,15 @@ export async function compressImage(
   let imageBitmap: ImageBitmap | undefined;
   try {
     imageBitmap = await createImageBitmapFromUrl(imageDataUrl);
-    const newWidth = Math.max(1, Math.round(imageBitmap.width * scale));
-    const newHeight = Math.max(1, Math.round(imageBitmap.height * scale));
+    const effectiveScale = fitWithin
+      ? Math.min(
+          scale,
+          fitWithin.width / imageBitmap.width,
+          fitWithin.height / imageBitmap.height,
+        )
+      : scale;
+    const newWidth = Math.max(1, Math.round(imageBitmap.width * effectiveScale));
+    const newHeight = Math.max(1, Math.round(imageBitmap.height * effectiveScale));
     assertPixelDimensions(
       newWidth,
       newHeight,
