@@ -65,6 +65,7 @@ const URL_PRIORITY_TOOLS = new Set<string>([
 // data) must never be interpreted as routing metadata.
 const TRUSTED_RESULT_TARGET_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.NAVIGATE,
+  TOOL_NAMES.BROWSER.SWITCH_TAB,
   TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
 ]);
 // Tools whose `background` argument can be auto-populated from MCP Background Mode.
@@ -151,6 +152,12 @@ function throwIfToolAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw createToolAbortError();
 }
 
+function hasSwitchTabSelector(args: any): boolean {
+  return [args?.url, args?.title].some(
+    (value) => typeof value === 'string' && value.trim() !== '',
+  );
+}
+
 function isTabScopedTool(toolName: string): boolean {
   if (NON_TAB_SCOPED_CHROME_TOOLS.has(toolName)) {
     return false;
@@ -228,6 +235,11 @@ async function resolveExecutionTarget(
 
   const preferWindowScopedExecution = shouldPreferWindowScopedExecution(toolName, args);
   if (!isTabScopedTool(toolName)) return {};
+  if (toolName === TOOL_NAMES.BROWSER.SWITCH_TAB && hasSwitchTabSelector(args)) {
+    // The tool finds its tab by url/title; filling in the session's current
+    // tab as tabId would switch to that tab instead.
+    return {};
+  }
   if (toolName === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN && args?.tabTarget === 'new') {
     // Respect explicit new-tab execution requests for flow runs.
     return {};

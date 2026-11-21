@@ -1713,7 +1713,8 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.SWITCH_TAB,
-    description: "Switch to a specific HTTP(S) browser tab",
+    description:
+      "Switch to an HTTP(S) browser tab by tabId, or find it by url and/or title text (no need to list tabs first). Later tool calls target the selected tab.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1721,9 +1722,20 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: "number",
           description: "The ID of the target HTTP(S) tab to switch to.",
         },
+        url: {
+          type: "string",
+          description:
+            "Instead of tabId: switch to the tab whose URL contains this text (case-insensitive). An exact URL match wins, otherwise the most recently used match; other matches are listed in the result.",
+        },
+        title: {
+          type: "string",
+          description:
+            "Instead of tabId: switch to the tab whose title contains this text (case-insensitive). Combined with url, a tab must match both.",
+        },
         windowId: {
           type: "number",
-          description: "The ID of the window where the tab is located.",
+          description:
+            "Only look for url/title matches in this window. The window holding the selected tab is focused unless background is true.",
         },
         background: {
           type: "boolean",
@@ -1731,7 +1743,7 @@ export const TOOL_SCHEMAS: Tool[] = [
             "Select the target tab for subsequent tool calls without activating the tab or focusing the window. Default: false. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored (the tab remains in the background).",
         },
       },
-      required: ["tabId"],
+      required: [],
     },
   },
   {

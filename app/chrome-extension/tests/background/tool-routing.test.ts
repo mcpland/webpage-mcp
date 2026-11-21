@@ -504,6 +504,30 @@ describe('handleCallTool navigation routing', () => {
     });
   });
 
+  it('lets chrome_switch_tab find its tab by url instead of the session tab', async () => {
+    mocks.switchExecute.mockResolvedValue({
+      content: [
+        { type: 'text', text: JSON.stringify({ success: true, tabId: 200, windowId: 77 }) },
+      ],
+      isError: false,
+    });
+
+    await handleCallTool({
+      name: TOOL_NAMES.BROWSER.SWITCH_TAB,
+      args: { url: 'github.com' },
+      meta: { mcpSessionId: 'session-1' },
+    });
+
+    expect(mocks.switchExecute).toHaveBeenCalledWith({ url: 'github.com' });
+    expect(mocks.runInTabQueue).not.toHaveBeenCalled();
+    // Later calls in the session target the tab that was switched to.
+    expect(mocks.patchSessionContext).toHaveBeenCalledWith(
+      'session-1',
+      { tabId: 200, windowId: 77 },
+      undefined,
+    );
+  });
+
   it('does not persist session target updates when chrome_switch_tab fails', async () => {
     await handleCallTool({
       name: TOOL_NAMES.BROWSER.SWITCH_TAB,

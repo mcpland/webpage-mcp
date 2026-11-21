@@ -954,9 +954,49 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
 export const closeTabsTool = new CloseTabsTool();
 
 interface SwitchTabToolParams {
-  tabId: number;
+  tabId?: number;
+  url?: string;
+  title?: string;
   windowId?: number;
   background?: boolean;
+}
+
+const SWITCH_TAB_MAX_OTHER_MATCHES = 5;
+
+function normalizeTabUrlForMatch(url: string): string {
+  return url.trim().toLowerCase().replace(/\/$/, '');
+}
+
+/**
+ * Pick the HTTP(S) tab whose URL and/or title contain the given text
+ * (case-insensitive). An exact URL match wins, then the most recently used tab.
+ */
+async function findTabsBySelector(selector: {
+  url?: string;
+  title?: string;
+  windowId?: number;
+}): Promise<chrome.tabs.Tab[]> {
+  const tabs = await chrome.tabs.query(
+    typeof selector.windowId === 'number' ? { windowId: selector.windowId } : {},
+  );
+  const urlNeedle = selector.url ? normalizeTabUrlForMatch(selector.url) : undefined;
+  const titleNeedle = selector.title?.trim().toLowerCase();
+  const matches = tabs.filter((tab) => {
+    const url = String(tab.url || '');
+    if (typeof tab.id !== 'number' || !/^https?:\/\//i.test(url)) return false;
+    if (urlNeedle && !url.toLowerCase().includes(urlNeedle)) return false;
+    if (titleNeedle && !String(tab.title || '').toLowerCase().includes(titleNeedle)) {
+      return false;
+    }
+    return true;
+  });
+  const isExact = (tab: chrome.tabs.Tab) =>
+    urlNeedle !== undefined && normalizeTabUrlForMatch(String(tab.url || '')) === urlNeedle;
+  const lastAccessed = (tab: chrome.tabs.Tab) =>
+    (tab as chrome.tabs.Tab & { lastAccessed?: number }).lastAccessed ?? 0;
+  return matches.sort(
+    (a, b) => Number(isExact(b)) - Number(isExact(a)) || lastAccessed(b) - lastAccessed(a),
+  );
 }
 
 /**
@@ -967,24 +1007,47 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
 
   async execute(args: SwitchTabToolParams): Promise<ToolResult> {
     const { tabId, windowId, background } = args;
+    const url = typeof args.url === 'string' && args.url.trim() ? args.url.trim() : undefined;
+    const title =
+      typeof args.title === 'string' && args.title.trim() ? args.title.trim() : undefined;
 
-    console.log(
-      `Attempting to switch to tab ID: ${tabId} in window ID: ${windowId}`,
-    );
+    if (typeof tabId !== 'number' && !url && !title) {
+      return createErrorResponse(
+        'chrome_switch_tab needs a tabId, or a url and/or title to find the tab by.',
+      );
+    }
 
     try {
-      const targetTab = await chrome.tabs.get(tabId);
+      let targetTab: chrome.tabs.Tab;
+      let otherMatches: chrome.tabs.Tab[] = [];
+      if (typeof tabId === 'number') {
+        targetTab = await chrome.tabs.get(tabId);
+      } else {
+        const matches = await findTabsBySelector({ url, title, windowId });
+        if (!matches[0]) {
+          const wanted = [url && `url containing "${url}"`, title && `title containing "${title}"`]
+            .filter(Boolean)
+            .join(' and ');
+          return createErrorResponse(
+            `No open HTTP(S) tab has a ${wanted}. Use chrome_navigate to open it, or get_windows_and_tabs to list tabs.`,
+          );
+        }
+        [targetTab, ...otherMatches] = matches;
+      }
       if (hasDisallowedPublicUrlScheme(String(targetTab.url || ''))) {
         return createErrorResponse(
           'Only http:// and https:// pages are supported by chrome_switch_tab',
         );
       }
+      const targetTabId = targetTab.id as number;
 
       if (background !== true) {
-        if (windowId !== undefined) {
-          await chrome.windows.update(windowId, { focused: true });
+        // Focus the window that actually holds the tab, or it stays hidden
+        // behind the current window.
+        if (typeof targetTab.windowId === 'number') {
+          await chrome.windows.update(targetTab.windowId, { focused: true });
         }
-        await chrome.tabs.update(tabId, { active: true });
+        await chrome.tabs.update(targetTabId, { active: true });
       }
 
       return {
@@ -995,11 +1058,20 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
               success: true,
               message:
                 background === true
-                  ? `Successfully selected tab ID: ${tabId} without activating it`
-                  : `Successfully switched to tab ID: ${tabId}`,
+                  ? `Successfully selected tab ID: ${targetTabId} without activating it`
+                  : `Successfully switched to tab ID: ${targetTabId}`,
               tabId: targetTab.id,
               windowId: targetTab.windowId,
               url: targetTab.url,
+              title: targetTab.title,
+              ...(otherMatches.length > 0
+                ? {
+                    otherMatches: otherMatches
+                      .slice(0, SWITCH_TAB_MAX_OTHER_MATCHES)
+                      .map((tab) => ({ tabId: tab.id, title: tab.title, url: tab.url })),
+                    matchCount: otherMatches.length + 1,
+                  }
+                : {}),
             }),
           },
         ],
