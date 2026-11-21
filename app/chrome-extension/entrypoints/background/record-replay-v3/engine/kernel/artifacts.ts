@@ -18,6 +18,7 @@ import {
   type ArtifactRetentionPolicy,
   type ArtifactStore,
 } from '../../storage/artifacts';
+import { captureVisibleTabPaced } from '@/utils/capture-visible-tab';
 
 /**
  * Screenshot results
@@ -161,7 +162,7 @@ export function createChromeArtifactService(options: {
         }
 
         // Capture the visible tab
-        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+        const dataUrl = await captureVisibleTabPaced(tab.windowId, {
           format,
           quality: format === 'jpeg' ? quality : undefined,
         });

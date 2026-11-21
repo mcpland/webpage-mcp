@@ -1,4 +1,5 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
+import { captureVisibleTabPaced } from '@/utils/capture-visible-tab';
 import { toPublicDownloadLocation } from '@/entrypoints/background/download-paths';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { SCREENSHOT_LIMITS, TOOL_NAMES } from 'webpage-mcp-shared';
@@ -383,7 +384,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         } else {
           // Visible area only
           this.logInfo('Capturing visible area...');
-          finalImageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+          finalImageDataUrl = await captureVisibleTabPaced(tab.windowId, { format: 'png' });
           assertScreenshotDataUrl(finalImageDataUrl, 'Visible screenshot data URL');
           let bitmap: ImageBitmap | undefined;
           try {
@@ -607,7 +608,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     // Small delay to ensure element is fully rendered after scrollIntoView
     await new Promise((resolve) => setTimeout(resolve, SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY));
 
-    const visibleCaptureDataUrl = await chrome.tabs.captureVisibleTab({
+    const visibleCaptureDataUrl = await captureVisibleTabPaced(undefined, {
       format: 'png',
     });
     if (!visibleCaptureDataUrl) {
@@ -733,7 +734,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         setTimeout(resolve, SCREENSHOT_CONSTANTS.CAPTURE_STITCH_DELAY_MS),
       );
 
-      const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' });
+      const dataUrl = await captureVisibleTabPaced(undefined, { format: 'png' });
       if (!dataUrl) throw new Error('captureVisibleTab returned empty during full page capture');
       assertScreenshotDataUrl(dataUrl, `Screenshot part ${partIndex + 1}`);
       capturedDataUrlBytes += dataUrl.length;
