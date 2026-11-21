@@ -7,10 +7,11 @@
   "type": "module",
   "scripts": {
     "dev": "wxt",
-    "build": "pnpm run verify:ort && wxt build && pnpm run verify:bundle",
-    "zip": "pnpm run verify:ort && wxt zip && pnpm run verify:bundle && node ./scripts/rename-zip.mjs chrome",
+    "build": "pnpm run verify:ort && wxt build && pnpm run verify:bundle && pnpm run verify:page-functions",
+    "zip": "pnpm run verify:ort && wxt zip && pnpm run verify:bundle && pnpm run verify:page-functions && node ./scripts/rename-zip.mjs chrome",
     "verify:ort": "node ./scripts/ort-artifacts.mjs verify",
     "verify:bundle": "node ./scripts/bundle-code-policy.mjs .output/chrome-mv3",
+    "verify:page-functions": "node ./scripts/verify-page-functions.mjs .output/chrome-mv3",
     "copy:ort": "node ./scripts/ort-artifacts.mjs copy",
     "compile": "tsc --noEmit",
     "i18n:check": "node ./scripts/validate-i18n.mjs",

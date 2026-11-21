@@ -42,7 +42,9 @@ export function serializeJavaScriptEvaluation(
     const MAX_VISITED_VALUES = 4096;
     const MAX_CHUNK_CHARS = 4096;
     const MAX_ENUMERATION_DURATION_MS = 100;
-    const MAX_SERIALIZABLE_BIGINT = 10n ** 4096n;
+    // Built without `**` or BigInt literals so syntax lowering can never
+    // introduce a bundle-scope helper into this page-serialized function.
+    const MAX_SERIALIZABLE_BIGINT = BigInt("1" + "0".repeat(4096));
 
     const requestedInteger =
       typeof requestedMaxOutputBytes === "number" &&

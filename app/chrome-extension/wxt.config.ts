@@ -143,8 +143,10 @@ export default defineConfig({
       }) as any,
     ],
     build: {
-      // Build artifacts need to be compatible with es6
-      target: "es2015",
+      // Match manifest.minimum_chrome_version. Older targets make esbuild lower
+      // syntax such as `**` into module-scope helpers, which breaks functions
+      // that are serialized into pages (Runtime.callFunctionOn, executeScript).
+      target: "chrome135",
       // Generate sourcemaps in non-production environments
       sourcemap: env.mode !== "production",
       // Disable gzip compressed size reporting, as compressing large files may be slow
