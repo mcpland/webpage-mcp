@@ -493,6 +493,8 @@ describe('navigateTool', () => {
       url: 'https://www.baidu.com',
       tabId: 7,
       openMode: 'current_tab',
+      // This mock never finishes loading; the commit path is what is under test.
+      waitUntil: 'commit',
     });
 
     expect(result.isError).toBe(false);
@@ -502,6 +504,92 @@ describe('navigateTool', () => {
     const payload = getTextPayload(result);
     expect(payload.message).toBe('Navigated current tab');
     expect(payload.url).toBe('https://www.baidu.com');
+  });
+
+  it('waits for the navigated page to finish loading by default', async () => {
+    let currentUrl = 'https://github.com/unadlib';
+    let loadingPolls = 0;
+    mocks.tabsGet.mockImplementation(async (tabId: number) => {
+      const navigated = currentUrl !== 'https://github.com/unadlib';
+      if (navigated) loadingPolls += 1;
+      return makeTab({
+        id: tabId,
+        windowId: 31,
+        url: currentUrl,
+        title: navigated && loadingPolls > 3 ? 'Loaded page' : 'Loading',
+        status: navigated && loadingPolls <= 3 ? 'loading' : 'complete',
+        active: true,
+      });
+    });
+    mocks.tabsUpdate.mockImplementation(async (tabId: number, updateProperties: any) => {
+      currentUrl = updateProperties.url;
+      return makeTab({ id: tabId, windowId: 31, url: currentUrl, status: 'loading' });
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://example.com/slow',
+      tabId: 7,
+      openMode: 'current_tab',
+    });
+    const payload = getTextPayload(result);
+
+    expect(loadingPolls).toBeGreaterThan(3);
+    expect(payload).toMatchObject({
+      url: 'https://example.com/slow',
+      status: 'complete',
+      title: 'Loaded page',
+    });
+    expect(payload.warnings).toBeUndefined();
+  });
+
+  it('reports a page that is still loading when the load wait expires', async () => {
+    vi.useFakeTimers();
+    let currentUrl = 'https://github.com/unadlib';
+    mocks.tabsGet.mockImplementation(async (tabId: number) =>
+      makeTab({
+        id: tabId,
+        windowId: 31,
+        url: currentUrl,
+        status: currentUrl === 'https://github.com/unadlib' ? 'complete' : 'loading',
+      }),
+    );
+    mocks.tabsUpdate.mockImplementation(async (tabId: number, updateProperties: any) => {
+      currentUrl = updateProperties.url;
+      return makeTab({ id: tabId, url: currentUrl, status: 'loading' });
+    });
+
+    const pending = navigateTool.execute({
+      url: 'https://example.com/never',
+      tabId: 7,
+      openMode: 'current_tab',
+    });
+    await vi.advanceTimersByTimeAsync(21_000);
+    const payload = getTextPayload(await pending);
+    vi.useRealTimers();
+
+    expect(payload.status).toBe('loading');
+    expect((payload as { warnings?: string[] }).warnings?.[0]).toContain('still loading');
+  });
+
+  it('waits for a refresh to finish loading', async () => {
+    let polls = 0;
+    mocks.tabsGet.mockImplementation(async (tabId: number) => {
+      polls += 1;
+      return makeTab({
+        id: tabId,
+        windowId: 31,
+        url: 'https://example.com/',
+        // First read resolves the target; the reload then loads for two polls.
+        status: polls === 1 || polls > 3 ? 'complete' : 'loading',
+      });
+    });
+
+    const result = await navigateTool.execute({ refresh: true, tabId: 7 });
+    const payload = getTextPayload(result);
+
+    expect(mocks.tabsReload).toHaveBeenCalledWith(7);
+    expect(polls).toBeGreaterThan(3);
+    expect(payload).toMatchObject({ message: 'Successfully refreshed current tab', status: 'complete' });
   });
 
   it('opens a new tab when default current tab is not an HTTP page', async () => {

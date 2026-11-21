@@ -1591,6 +1591,12 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             "Refresh the current active HTTP(S) tab instead of navigating to a URL. When true, the url parameter is ignored. Defaults to false",
         },
+        waitUntil: {
+          type: "string",
+          enum: ["load", "commit"],
+          description:
+            'When to return: "load" (default) waits until the page finished loading (up to 20s; the result reports `status` and a warning if it is still loading); "commit" returns as soon as the new URL is committed.',
+        },
       },
       required: [],
     },

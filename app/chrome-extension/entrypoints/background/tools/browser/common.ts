@@ -8,8 +8,14 @@ const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 720;
 const NAVIGATION_POLL_MS = 100;
 const NAVIGATION_WAIT_TIMEOUT_MS = 8000;
+// Upper bound for waiting until the page finishes loading after it commits.
+const NAVIGATION_LOAD_TIMEOUT_MS = 20_000;
+// Reload/history navigations that never report "loading" within this window
+// are treated as already settled (for example same-document history entries).
+const NAVIGATION_START_GRACE_MS = 1000;
 
 type NavigateOpenMode = 'current_tab' | 'new_tab' | 'new_window';
+type NavigationWaitUntil = 'load' | 'commit';
 
 interface NavigateToolParams {
   url?: string;
@@ -22,6 +28,7 @@ interface NavigateToolParams {
   tabId?: number;
   windowId?: number;
   background?: boolean; // when true, do not activate tab or focus window
+  waitUntil?: NavigationWaitUntil; // 'load' (default) or 'commit'
 }
 
 export function hasDisallowedPublicUrlScheme(url: string): boolean {
@@ -117,7 +124,70 @@ class NavigateTool extends BaseBrowserToolExecutor {
     return /^https?:\/\//i.test(url);
   }
 
+  /**
+   * Wait until the navigation committed and, unless waitUntil is "commit",
+   * until the page finished loading. Returning at commit made follow-up
+   * screenshots, coordinate clicks and reads race a half-loaded document.
+   */
   private async waitForUpdatedTab(
+    tabId: number,
+    options: {
+      previousUrl?: string;
+      targetUrl?: string;
+      timeoutMs?: number;
+      waitUntil?: NavigationWaitUntil;
+    } = {},
+  ): Promise<chrome.tabs.Tab> {
+    const startedAt = Date.now();
+    const committed = await this.waitForCommittedTab(tabId, options);
+    if (options.waitUntil === 'commit' || committed.status === 'complete') {
+      return committed;
+    }
+    return this.waitForLoadComplete(
+      committed.id ?? tabId,
+      startedAt + NAVIGATION_LOAD_TIMEOUT_MS,
+    );
+  }
+
+  private async waitForLoadComplete(
+    tabId: number,
+    deadline: number,
+  ): Promise<chrome.tabs.Tab> {
+    let current = await chrome.tabs.get(tabId);
+    while (current.status !== 'complete' && Date.now() < deadline) {
+      await this.sleep(NAVIGATION_POLL_MS);
+      current = await chrome.tabs.get(tabId);
+    }
+    return current;
+  }
+
+  /**
+   * Settle a reload or history navigation: wait for it to start (status
+   * "loading" or a URL change), then for it to finish loading.
+   */
+  private async waitForNavigationToSettle(
+    tabId: number,
+    previousUrl: string,
+    waitUntil: NavigationWaitUntil,
+  ): Promise<chrome.tabs.Tab> {
+    if (waitUntil === 'commit') return chrome.tabs.get(tabId);
+    const startedAt = Date.now();
+    let started = false;
+    for (;;) {
+      const current = await chrome.tabs.get(tabId);
+      if (current.status !== 'complete' || (current.url || '') !== previousUrl) {
+        started = true;
+      }
+      const now = Date.now();
+      if (current.status === 'complete' && (started || now - startedAt >= NAVIGATION_START_GRACE_MS)) {
+        return current;
+      }
+      if (now - startedAt >= NAVIGATION_LOAD_TIMEOUT_MS) return current;
+      await this.sleep(NAVIGATION_POLL_MS);
+    }
+  }
+
+  private async waitForCommittedTab(
     tabId: number,
     options: {
       previousUrl?: string;
@@ -208,7 +278,25 @@ class NavigateTool extends BaseBrowserToolExecutor {
     }
   }
 
-  private buildTabResult(tab: chrome.tabs.Tab, message: string): ToolResult {
+  private loadState(tab: chrome.tabs.Tab, waitUntil: NavigationWaitUntil): Record<string, unknown> {
+    return {
+      status: tab.status,
+      ...(typeof tab.title === 'string' && tab.title ? { title: tab.title } : {}),
+      ...(waitUntil === 'load' && tab.status !== 'complete'
+        ? {
+            warnings: [
+              `The page was still loading after ${NAVIGATION_LOAD_TIMEOUT_MS / 1000}s; its content may be incomplete.`,
+            ],
+          }
+        : {}),
+    };
+  }
+
+  private buildTabResult(
+    tab: chrome.tabs.Tab,
+    message: string,
+    waitUntil: NavigationWaitUntil,
+  ): ToolResult {
     return {
       content: [
         {
@@ -219,6 +307,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             tabId: tab.id,
             windowId: tab.windowId,
             url: tab.url,
+            ...this.loadState(tab, waitUntil),
           }),
         },
       ],
@@ -263,6 +352,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
       background,
       windowId,
     } = args;
+    if (args.waitUntil !== undefined && args.waitUntil !== 'load' && args.waitUntil !== 'commit') {
+      return createErrorResponse('waitUntil must be "load" or "commit"');
+    }
+    const waitUntil: NavigationWaitUntil = args.waitUntil ?? 'load';
 
     console.log(
       `Attempting to ${refresh ? 'refresh current tab' : `open URL: ${url}`} with options:`,
@@ -283,12 +376,16 @@ class NavigateTool extends BaseBrowserToolExecutor {
         if (hasDisallowedPublicUrlScheme(String(targetTab.url || ''))) {
           return createErrorResponse(getNavigateTargetPageError('refresh'));
         }
+        const urlBeforeReload = String(targetTab.url || '');
         await chrome.tabs.reload(targetTab.id);
 
         console.log(`Refreshed tab ID: ${targetTab.id}`);
 
-        // Get updated tab information
-        const updatedTab = await chrome.tabs.get(targetTab.id);
+        const updatedTab = await this.waitForNavigationToSettle(
+          targetTab.id,
+          urlBeforeReload,
+          waitUntil,
+        );
         if (hasDisallowedPublicUrlScheme(String(updatedTab.url || ''))) {
           return createErrorResponse(getNavigateTargetPageError('refresh'));
         }
@@ -306,6 +403,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 tabId: updatedTab.id,
                 windowId: updatedTab.windowId,
                 url: updatedTab.url,
+                ...this.loadState(updatedTab, waitUntil),
               }),
             },
           ],
@@ -339,6 +437,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           focusWindow: background !== true,
         });
 
+        const urlBeforeHistory = String(targetTab.url || '');
         if (url === 'forward') {
           await chrome.tabs.goForward(targetTab.id);
           console.log(`Navigated forward in tab ID: ${targetTab.id}`);
@@ -347,7 +446,11 @@ class NavigateTool extends BaseBrowserToolExecutor {
           console.log(`Navigated back in tab ID: ${targetTab.id}`);
         }
 
-        const updatedTab = await chrome.tabs.get(targetTab.id);
+        const updatedTab = await this.waitForNavigationToSettle(
+          targetTab.id,
+          urlBeforeHistory,
+          waitUntil,
+        );
         if (hasDisallowedPublicUrlScheme(String(updatedTab.url || ''))) {
           return createErrorResponse(getNavigateTargetPageError('history'));
         }
@@ -365,6 +468,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 tabId: updatedTab.id,
                 windowId: updatedTab.windowId,
                 url: updatedTab.url,
+                ...this.loadState(updatedTab, waitUntil),
               }),
             },
           ],
@@ -424,11 +528,13 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
           const updatedTab = await this.waitForUpdatedTab(createdTab.id, {
             targetUrl: url,
+            waitUntil,
           });
           await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
           return this.buildTabResult(
             updatedTab,
             'Opened URL in new tab because target tab is not an HTTP(S) page',
+            waitUntil,
           );
         }
 
@@ -445,6 +551,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const updatedTab = await this.waitForUpdatedTab(activeTargetTabId, {
           previousUrl: beforeUrl,
           targetUrl: url,
+          waitUntil,
         });
 
         await this.ensureFocus(updatedTab, {
@@ -452,7 +559,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           focusWindow: background !== true,
         });
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
-        return this.buildTabResult(updatedTab, 'Navigated current tab');
+        return this.buildTabResult(updatedTab, 'Navigated current tab', waitUntil);
       }
 
       if (effectiveOpenMode === 'new_window') {
@@ -474,6 +581,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           if (firstTab?.id) {
             const updatedFirstTab = await this.waitForUpdatedTab(firstTab.id, {
               targetUrl: url,
+              waitUntil,
             });
             await this.triggerAutoCapture(
               updatedFirstTab.id!,
@@ -514,9 +622,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
         const updatedTab = await this.waitForUpdatedTab(createdTab.id, {
           targetUrl: url,
+          waitUntil,
         });
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
-        return this.buildTabResult(updatedTab, 'Opened URL in new tab');
+        return this.buildTabResult(updatedTab, 'Opened URL in new tab', waitUntil);
       }
 
       console.warn(
@@ -538,6 +647,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         if (firstTab?.id) {
           const updatedFirstTab = await this.waitForUpdatedTab(firstTab.id, {
             targetUrl: url,
+            waitUntil,
           });
           await this.triggerAutoCapture(
             updatedFirstTab.id!,
