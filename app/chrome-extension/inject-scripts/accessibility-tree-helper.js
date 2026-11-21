@@ -125,9 +125,20 @@
     return refId;
   }
 
+  // Text inside these elements is code or fallback markup, never visible copy.
+  const NON_TEXT_CONTAINERS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
+  const visibleTextFilter = {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      return parent && NON_TEXT_CONTAINERS.has(parent.tagName)
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_ACCEPT;
+    },
+  };
+
   function collectBoundedText(root, state, maximumBytes = MAX_ATTRIBUTE_BYTES) {
     if (!root) return '';
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, visibleTextFilter);
     let output = '';
     let current = walker.nextNode();
     let nodes = 0;
@@ -958,7 +969,16 @@
    * @param {string[]} out
    * @param {Array<{ref:string, selector:string, rect:{x:number,y:number,width:number,height:number}}>} refMap
    */
-  function traverse(el, depth, domDepth, cfg, out, refMap, state) {
+  /** Label from explicit naming attributes only (no aggregated subtree text). */
+  function explicitLabel(el) {
+    const aria = el.getAttribute('aria-label');
+    if (aria && aria.trim()) return cleanLineValue(aria);
+    const title = el.getAttribute('title');
+    if (title && title.trim()) return cleanLineValue(title);
+    return '';
+  }
+
+  function traverse(el, depth, domDepth, cfg, out, refMap, state, inheritedLabel = '') {
     const maxDepth =
       cfg && typeof cfg.maxDepth === 'number' ? cfg.maxDepth : MAX_DEPTH;
     if (state.stop || depth > maxDepth || !el || !el.tagName) return;
@@ -974,15 +994,37 @@
     if (state.visited.has(el)) return;
     state.visited.add(el);
     state.visitedCount++;
-    const include = shouldInclude(el, cfg, state) || depth === 0;
+    let include = shouldInclude(el, cfg, state) || depth === 0;
+    let role = '';
+    let label = '';
+    if (include) {
+      role = inferRole(el);
+      // The page root's aggregated text would just repeat everything below it.
+      label =
+        depth === 0 && cfg.rootIsBody && role === 'generic'
+          ? explicitLabel(el)
+          : inferLabel(el, state);
+      if (label) {
+        label = cleanLineValue(label, MAX_LINE_LABEL * 4).substring(0, MAX_LINE_LABEL);
+      }
+      // Generic wrappers with no name of their own, or that only repeat the
+      // text of the nearest listed ancestor, add lines but no information.
+      if (
+        depth > 0 &&
+        role === 'generic' &&
+        (!label || label === inheritedLabel) &&
+        !(/** @type {HTMLElement} */ (el).id) &&
+        !isInteractive(el)
+      ) {
+        include = false;
+      }
+    }
     if (include) {
       if (state.included >= MAX_INCLUDED_NODES) {
         markTreeTruncated(state, 'included_nodes');
         state.stop = true;
         return;
       }
-      const role = inferRole(el);
-      let label = inferLabel(el, state);
       const refId = ensureRef(el);
       if (state.layoutChecks >= MAX_LAYOUT_CHECKS) {
         markTreeTruncated(state, 'layout_checks');
@@ -995,7 +1037,6 @@
       const cy = Math.round(rect.top + rect.height / 2);
       let line = `${'  '.repeat(depth)}- ${role}`;
       if (label) {
-        label = cleanLineValue(label, MAX_LINE_LABEL * 4).substring(0, MAX_LINE_LABEL);
         line += ` "${label}"`;
       }
       line += ` [ref=${refId}] (x=${cx},y=${cy})`;
@@ -1073,6 +1114,7 @@
           out,
           refMap,
           state,
+          include ? label : inheritedLabel,
         );
         child = next;
       }
@@ -1092,6 +1134,7 @@
             out,
             refMap,
             state,
+            include ? label : inheritedLabel,
           );
           child = next;
         }
@@ -1155,6 +1198,7 @@
         }
       }
 
+      cfg.rootIsBody = root === document.body;
       if (root) traverse(root, 0, 0, cfg, out, refMap, state);
       for (const k in window.__claudeElementMap) {
         if (
@@ -1163,9 +1207,7 @@
         )
           delete window.__claudeElementMap[k];
       }
-      const pageContent = out
-        .filter((line) => !/^\s*- generic \[ref=ref_\d+\]$/.test(line))
-        .join('\n');
+      const pageContent = out.join('\n');
       const end =
         performance && performance.now ? performance.now() : Date.now();
       return {

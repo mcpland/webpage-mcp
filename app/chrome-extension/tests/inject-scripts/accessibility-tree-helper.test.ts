@@ -109,6 +109,41 @@ describe('accessibility-tree-helper resource boundaries', () => {
     expect(page).not.toMatch(/"Top"[^\n]*offscreen/);
   });
 
+  it('keeps script source out of labels and gives the page root no aggregated label', () => {
+    document.body.innerHTML =
+      '<div class="card">Quarterly report<script>var secretToken = "abc";</script></div><button>Go</button>';
+
+    const tree = loadHelper()(null).pageContent;
+
+    expect(tree).not.toContain('secretToken');
+    expect(tree.split('\n')[0]).toMatch(/^- generic \[ref=ref_\d+\] \(x=/);
+    expect(tree).toContain('generic "Quarterly report"');
+  });
+
+  it('collapses wrapper chains that repeat the same text', () => {
+    document.body.innerHTML =
+      '<div class="a"><div class="b"><div class="c"><span>Quarterly revenue report</span></div></div></div>' +
+      '<ul><li><div><span>Item one</span></div></li></ul>';
+
+    const lines = loadHelper()(null).pageContent.split('\n');
+
+    expect(lines.filter((line) => line.includes('"Quarterly revenue report"'))).toHaveLength(1);
+    // list/listitem are meaningful roles; only the generic wrappers inside are dropped.
+    expect(lines.filter((line) => line.includes('generic "Item one"'))).toHaveLength(0);
+    expect(lines.some((line) => line.includes('listitem "Item one"'))).toBe(true);
+  });
+
+  it('drops nameless generic containers but keeps nameless interactive ones', () => {
+    document.body.innerHTML =
+      '<div class="navbar"><div class="menu-wrapper"><div tabindex="0" class="icon"></div></div></div>';
+
+    const lines = loadHelper()(null).pageContent.split('\n');
+
+    // Root line plus the focusable icon; the two empty wrappers are gone.
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toMatch(/^ {2}- generic \[ref=ref_\d+\] \(x=\d+,y=\d+\)$/);
+  });
+
   it('counts excluded nodes against the traversal budget', () => {
     const fragment = document.createDocumentFragment();
     for (let index = 0; index < 12_100; index += 1) {
