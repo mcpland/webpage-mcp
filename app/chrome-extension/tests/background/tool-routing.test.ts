@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   fillExecute: vi.fn(),
   keyboardExecute: vi.fn(),
   networkRequestExecute: vi.fn(),
+  dialogExecute: vi.fn(),
+  downloadExecute: vi.fn(),
   flowRunExecute: vi.fn(),
   runCancelExecute: vi.fn(),
   listPublishedExecute: vi.fn(),
@@ -36,6 +38,8 @@ vi.mock('@/entrypoints/background/tools/browser', () => ({
     name: 'chrome_network_request',
     execute: mocks.networkRequestExecute,
   },
+  handleDialogTool: { name: 'chrome_handle_dialog', execute: mocks.dialogExecute },
+  handleDownloadTool: { name: 'chrome_handle_download', execute: mocks.downloadExecute },
 }));
 
 vi.mock('@/entrypoints/background/tools/record-replay', () => ({
@@ -463,6 +467,41 @@ describe('handleCallTool navigation routing', () => {
       { tabId: 10, windowId: 55 },
       undefined,
     );
+  });
+
+  it.each([
+    ['chrome_handle_dialog', 'dialogExecute'],
+    ['chrome_handle_download', 'downloadExecute'],
+  ] as const)('runs %s outside the per-tab queue', async (name, executeKey) => {
+    mocks[executeKey].mockResolvedValue({
+      content: [{ type: 'text', text: '{"success":true}' }],
+      isError: false,
+    });
+
+    await handleCallTool({
+      name,
+      args: { tabId: 10, action: 'accept' },
+      meta: { mcpSessionId: 'session-1' },
+    });
+
+    expect(mocks[executeKey]).toHaveBeenCalled();
+    expect(mocks.runInTabQueue).not.toHaveBeenCalled();
+  });
+
+  it('passes the call signal to the per-tab queue', async () => {
+    const controller = new AbortController();
+    mocks.clickExecute.mockResolvedValue({ content: [], isError: false });
+
+    await handleCallTool({
+      name: TOOL_NAMES.BROWSER.CLICK,
+      args: { tabId: 10, selector: '#go' },
+      meta: { mcpSessionId: 'session-1' },
+      signal: controller.signal,
+    });
+
+    expect(mocks.runInTabQueue).toHaveBeenCalledWith(10, expect.any(Function), {
+      signal: controller.signal,
+    });
   });
 
   it('does not persist session target updates when chrome_switch_tab fails', async () => {

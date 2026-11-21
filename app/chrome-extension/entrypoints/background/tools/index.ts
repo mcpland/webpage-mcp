@@ -90,6 +90,13 @@ const BACKGROUND_DEFAULT_SUPPORTED_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.KEYBOARD,
   TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
 ]);
+// Control tools resolve browser-level state that an in-flight page interaction
+// may be blocked on (a JavaScript dialog opened by a click, a download started
+// by a click). Queuing them behind that interaction would deadlock the tab.
+const TAB_QUEUE_EXEMPT_TOOLS = new Set<string>([
+  TOOL_NAMES.BROWSER.HANDLE_DIALOG,
+  TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD,
+]);
 const MCP_CONTEXT_AWARE_TOOLS = new Set<string>([
   TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
   TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
@@ -447,8 +454,8 @@ export const handleCallTool = async (param: ToolCallParam) => {
       return result;
     };
     const result =
-      typeof resolvedTarget.tabId === 'number'
-        ? await runInTabQueue(resolvedTarget.tabId, execute)
+      typeof resolvedTarget.tabId === 'number' && !TAB_QUEUE_EXEMPT_TOOLS.has(param.name)
+        ? await runInTabQueue(resolvedTarget.tabId, execute, { signal: param.signal })
         : await execute();
 
     throwIfToolAborted(param.signal);
