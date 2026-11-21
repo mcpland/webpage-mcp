@@ -3,6 +3,33 @@ import type { ToolResult } from '@/common/tool-handler';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 
 const PING_TIMEOUT_MS = 300;
+const TOP_FRAME_ID = 0;
+
+/**
+ * Ping action answered by each injected helper once it has initialized.
+ *
+ * Pings identify the script being injected rather than the calling tool:
+ * several tools inject the same helper, and a pong from one helper must never
+ * be taken as proof that a different helper is present. Scripts without an
+ * entry are always (re)injected; every helper guards its own initialization.
+ */
+export const INJECTED_SCRIPT_PING_ACTIONS: Readonly<Record<string, string>> =
+  Object.freeze({
+    'inject-scripts/accessibility-tree-helper.js': 'chrome_read_page_ping',
+    'inject-scripts/click-helper.js': 'chrome_click_element_ping',
+    'inject-scripts/dom-observer.js': 'dom_observer_ping',
+    'inject-scripts/element-marker.js': 'element_marker_ping',
+    'inject-scripts/element-picker.js': 'chrome_request_element_selection_ping',
+    'inject-scripts/fill-helper.js': 'chrome_fill_or_select_ping',
+    'inject-scripts/interactive-elements-helper.js':
+      'chrome_get_interactive_elements_ping',
+    'inject-scripts/keyboard-helper.js': 'chrome_keyboard_ping',
+    'inject-scripts/network-helper.js': 'chrome_network_request_ping',
+    'inject-scripts/recorder.js': 'rr_recorder_ping',
+    'inject-scripts/screenshot-helper.js': 'chrome_screenshot_ping',
+    'inject-scripts/wait-helper.js': 'wait_helper_ping',
+    'inject-scripts/web-fetcher-helper.js': 'chrome_web_fetcher_ping',
+  });
 
 /**
  * Base class for browser tool executors
@@ -10,6 +37,32 @@ const PING_TIMEOUT_MS = 300;
 export abstract class BaseBrowserToolExecutor implements ToolExecutor {
   abstract name: string;
   abstract execute(args: any): Promise<ToolResult>;
+
+  /**
+   * Resolve to true only when the helper answering `action` in `frameId`
+   * reports that it is initialized.
+   */
+  private async pingInjectedScript(
+    tabId: number,
+    action: string,
+    frameId: number,
+  ): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([
+        chrome.tabs.sendMessage(tabId, { action }, { frameId }),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), PING_TIMEOUT_MS);
+        }),
+      ]);
+      return (response as { status?: unknown } | undefined)?.status === 'pong';
+    } catch {
+      // No listener in that frame yet: the helper has to be injected.
+      return false;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
 
   /**
    * Inject content script into tab
@@ -22,42 +75,23 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
     allFrames: boolean = false,
     frameIds?: number[],
   ): Promise<void> {
-    console.log(`Injecting ${files.join(', ')} into tab ${tabId}`);
-
-    // check if script is already injected
-    try {
-      const pingFrameId = frameIds?.[0];
-      const response = await Promise.race([
-        typeof pingFrameId === 'number'
-          ? chrome.tabs.sendMessage(
-              tabId,
-              { action: `${this.name}_ping` },
-              { frameId: pingFrameId },
-            )
-          : chrome.tabs.sendMessage(tabId, { action: `${this.name}_ping` }),
-        new Promise((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(`${this.name} Ping action to tab ${tabId} timed out`),
-              ),
-            PING_TIMEOUT_MS,
-          ),
-        ),
-      ]);
-
-      if (response && response.status === 'pong') {
-        console.log(
-          `pong received for action '${this.name}' in tab ${tabId}. Assuming script is active.`,
-        );
-        return;
-      } else {
-        console.warn(`Unexpected ping response in tab ${tabId}`);
+    // A single ping cannot vouch for several frames, and MAIN-world scripts
+    // cannot answer runtime messages; those injections rely on the helpers'
+    // own initialization guards instead.
+    const targetsSingleFrame =
+      frameIds && frameIds.length > 0 ? frameIds.length === 1 : !allFrames;
+    const canPing = world === 'ISOLATED' && targetsSingleFrame;
+    let pendingFiles = files;
+    if (canPing) {
+      const pingFrameId = frameIds?.[0] ?? TOP_FRAME_ID;
+      pendingFiles = [];
+      for (const file of files) {
+        const action = INJECTED_SCRIPT_PING_ACTIONS[file];
+        if (!action || !(await this.pingInjectedScript(tabId, action, pingFrameId))) {
+          pendingFiles.push(file);
+        }
       }
-    } catch (error) {
-      console.error(
-        `ping content script failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      if (pendingFiles.length === 0) return;
     }
 
     try {
@@ -73,13 +107,10 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
       }
       await chrome.scripting.executeScript({
         target,
-        files,
+        files: pendingFiles,
         injectImmediately,
         world,
       } as any);
-      console.log(
-        `'${files.join(', ')}' injection successful for tab ${tabId}`,
-      );
     } catch (injectionError) {
       const errorMessage =
         injectionError instanceof Error
