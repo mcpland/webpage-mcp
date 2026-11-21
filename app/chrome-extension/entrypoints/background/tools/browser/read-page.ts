@@ -56,6 +56,7 @@ interface ReadPageStats {
 
 interface ReadPageParams {
   filter?: 'interactive'; // when omitted, return all visible elements
+  scope?: 'viewport' | 'page'; // 'page' also returns elements outside the viewport
   depth?: number; // maximum DOM depth to traverse (0 = root only)
   refId?: string; // focus on subtree rooted at this refId
   frameId?: number; // read this frame instead of the top frame
@@ -84,6 +85,12 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     if (filter !== undefined && filter !== 'interactive') {
       return createErrorResponse(
         `${ERROR_MESSAGES.INVALID_PARAMETERS}: filter must be "interactive" when provided`,
+      );
+    }
+    const scope = args?.scope ?? 'viewport';
+    if (scope !== 'viewport' && scope !== 'page') {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: scope must be "viewport" or "page"`,
       );
     }
 
@@ -187,6 +194,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           filter: filter || null,
           depth: requestedDepth,
           refId: focusRef || undefined,
+          scope,
         },
         targetFrameId,
       );
@@ -266,6 +274,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       const basePayload: Record<string, any> = {
         success: true,
         filter: filter || 'all',
+        scope,
         pageContent,
         truncated: treeTruncated,
         tips: standardTips,

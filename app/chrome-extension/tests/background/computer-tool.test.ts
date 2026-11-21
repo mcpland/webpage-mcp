@@ -109,6 +109,32 @@ describe('computerTool', () => {
     expect(fill.mock.calls[1][0]).toMatchObject({ selector: '#missing' });
   });
 
+  it('scrolls at the viewport center when no coordinates or ref are given', async () => {
+    vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId: number, method: string) =>
+        method === 'Page.getLayoutMetrics'
+          ? { cssLayoutViewport: { clientWidth: 1280, clientHeight: 720 } }
+          : {},
+      );
+
+    const result = await computerTool.execute({
+      tabId: 7,
+      action: 'scroll',
+      scrollDirection: 'down',
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(sendCommand).toHaveBeenCalledWith(
+      7,
+      'Input.dispatchMouseEvent',
+      expect.objectContaining({ type: 'mouseWheel', x: 640, y: 360, deltaY: 300 }),
+    );
+  });
+
   it('rejects file URL tabs before zoom screenshots', async () => {
     const tryGetTab = vi
       .spyOn(computerTool as any, 'tryGetTab')

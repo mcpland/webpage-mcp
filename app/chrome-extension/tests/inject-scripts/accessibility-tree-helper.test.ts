@@ -78,6 +78,37 @@ describe('accessibility-tree-helper resource boundaries', () => {
     vi.restoreAllMocks();
   });
 
+  it('includes and marks off-screen elements only for scope "page"', () => {
+    document.body.innerHTML =
+      '<button id="top">Top</button><button id="far" data-far="1">Far below</button>';
+    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+      const top = this.getAttribute('data-far') ? 5000 : 0;
+      return {
+        x: 0,
+        y: top,
+        width: 20,
+        height: 10,
+        top,
+        right: 20,
+        bottom: top + 10,
+        left: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    });
+    const generate = loadHelper() as unknown as (
+      filter: 'interactive' | null,
+      options?: { scope?: 'viewport' | 'page' },
+    ) => AccessibilityTreeResult;
+
+    const viewport = generate('interactive').pageContent;
+    const page = generate('interactive', { scope: 'page' }).pageContent;
+
+    expect(viewport).toContain('"Top"');
+    expect(viewport).not.toMatch(/button "Far below"/);
+    expect(page).toMatch(/button "Far below" \[ref=ref_\d+\] \(x=\d+,y=\d+\) offscreen id="far"/);
+    expect(page).not.toMatch(/"Top"[^\n]*offscreen/);
+  });
+
   it('counts excluded nodes against the traversal budget', () => {
     const fragment = document.createDocumentFragment();
     for (let index = 0; index < 12_100; index += 1) {

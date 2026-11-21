@@ -1008,8 +1008,6 @@ class ComputerTool extends BaseBrowserToolExecutor {
         }
       }
       case 'scroll': {
-        if (!params.coordinates && !params.ref)
-          return createErrorResponse('Provide ref or coordinates for scroll');
         let coord = params.coordinates
           ? project(params.coordinates)!
           : (undefined as any);
@@ -1019,6 +1017,19 @@ class ComputerTool extends BaseBrowserToolExecutor {
               (await resolveRefPoint(params.ref, params.frameId)) || coord;
           } catch {
             // ignore
+          }
+        } else if (!params.coordinates) {
+          // "Scroll down" needs no target: wheel at the viewport center.
+          try {
+            const metrics: any = await CDPHelper.send(tab.id, 'Page.getLayoutMetrics', {});
+            const viewport = metrics?.cssLayoutViewport || metrics?.layoutViewport;
+            const width = Number(viewport?.clientWidth);
+            const height = Number(viewport?.clientHeight);
+            if (width > 0 && height > 0) {
+              coord = { x: Math.round(width / 2), y: Math.round(height / 2) };
+            }
+          } catch {
+            // fall through to the error below
           }
         }
         if (!coord)

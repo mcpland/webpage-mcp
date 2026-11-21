@@ -162,6 +162,26 @@ describe('readPageTool', () => {
     );
   });
 
+  it('forwards scope "page" and rejects unknown scopes', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'activateTabIfNeeded').mockResolvedValue(makeTab());
+    const send = vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: Array.from({ length: 12 }, (_, i) => `- link "l${i}" [ref=ref_${i}]`).join('\n'),
+      viewport: { width: 800, height: 600, dpr: 1 },
+      stats: { processed: 12, included: 12, durationMs: 1 },
+      refMap: [{}, {}, {}],
+    });
+
+    const result = await readPageTool.execute({ tabId: 7, scope: 'page' });
+    expect(JSON.parse(String((result.content[0] as { text?: string }).text)).scope).toBe('page');
+    expect(send).toHaveBeenCalledWith(7, expect.objectContaining({ scope: 'page' }), 0);
+
+    const invalid = await readPageTool.execute({ tabId: 7, scope: 'document' as any });
+    expect(invalid.isError).toBe(true);
+  });
+
   it('returns a sparse tree instead of failing when the fallback is unavailable', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue(makeTab());
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);

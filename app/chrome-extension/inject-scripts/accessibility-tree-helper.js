@@ -862,7 +862,9 @@
       return false;
     if (el.getAttribute('aria-hidden') === 'true') return false;
     if (!isVisible(el, state)) return false;
-    if (cfg.filter !== 'all') {
+    // scope "page" keeps elements outside the viewport (they are marked
+    // "offscreen"), so callers can find them without scroll-and-reread loops.
+    if (cfg.filter !== 'all' && cfg.scope !== 'page') {
       // Inactive/background tabs frequently report window.innerWidth/innerHeight
       // as 0 because Chrome does not allocate a layout viewport for hidden tabs.
       // Fall back to the document element's client size (which still reflects
@@ -952,7 +954,7 @@
    * Traverse DOM and build pageContent lines; collect ref map for interactive nodes.
    * @param {Element} el
    * @param {number} depth
-   * @param {{filter?: 'all'|'interactive', maxDepth?: number}} cfg
+   * @param {{filter?: 'all'|'interactive', maxDepth?: number, scope?: 'viewport'|'page'}} cfg
    * @param {string[]} out
    * @param {Array<{ref:string, selector:string, rect:{x:number,y:number,width:number,height:number}}>} refMap
    */
@@ -997,6 +999,17 @@
         line += ` "${label}"`;
       }
       line += ` [ref=${refId}] (x=${cx},y=${cy})`;
+      if (cfg.scope === 'page') {
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+        if (
+          vw > 0 &&
+          vh > 0 &&
+          !(rect.top < vh && rect.bottom > 0 && rect.left < vw && rect.right > 0)
+        ) {
+          line += ' offscreen';
+        }
+      }
       if (/** @type {HTMLElement} */ (el).id)
         line += ` id="${cleanLineValue(/** @type {HTMLElement} */ (el).id)}"`;
       const href = el.getAttribute('href');
@@ -1091,14 +1104,17 @@
   /**
    * Generate tree and return
    * @param {'all'|'interactive'|null} filter
-   * @param {{maxDepth?: number, refId?: string}|undefined} options
+   * @param {{maxDepth?: number, refId?: string, scope?: 'viewport'|'page'}|undefined} options
    */
   function __generateAccessibilityTree(filter, options) {
     try {
       const start =
         performance && performance.now ? performance.now() : Date.now();
       const out = [];
-      const cfg = { filter: filter || undefined };
+      const cfg = {
+        filter: filter || undefined,
+        scope: options && options.scope === 'page' ? 'page' : 'viewport',
+      };
 
       // Clamp maxDepth to MAX_DEPTH to keep costs bounded
       if (options && Number.isFinite(options.maxDepth)) {
@@ -1660,6 +1676,7 @@
         const result = __generateAccessibilityTree(request.filter || null, {
           maxDepth: request.depth,
           refId: request.refId,
+          scope: request.scope,
         });
         if (result && result.error) {
           sendResponse({ success: false, error: result.error });

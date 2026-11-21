@@ -1250,7 +1250,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.READ_PAGE,
     description:
-      "Get an accessibility tree representation of visible elements on the current HTTP(S) page. Only returns elements that are visible in the viewport. Optionally filter for only interactive elements.\nThe tree covers the top frame; iframe contents are not inlined. When the page has iframes the result lists them in `frames` — pass a frameId to read one. Refs from an iframe are frame-qualified (e.g. \"f12:ref_3\") and work unchanged with every ref-accepting tool.\nTip: If the returned elements do not include the specific element you need, use the computer tool's screenshot (action=\"screenshot\") to capture the element's on-screen coordinates, then operate by coordinates.",
+      "Get an accessibility tree representation of visible elements on the current HTTP(S) page. By default only elements inside the viewport are returned; pass scope=\"page\" to include the whole page (elements outside the viewport are marked `offscreen`; act on them by ref, which scrolls them into view). Optionally filter for only interactive elements.\nThe tree covers the top frame; iframe contents are not inlined. When the page has iframes the result lists them in `frames` — pass a frameId to read one. Refs from an iframe are frame-qualified (e.g. \"f12:ref_3\") and work unchanged with every ref-accepting tool.\nTip: If the returned elements do not include the specific element you need, use the computer tool's screenshot (action=\"screenshot\") to capture the element's on-screen coordinates, then operate by coordinates.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1258,6 +1258,12 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: "string",
           description:
             'Filter elements: "interactive" for such as  buttons/links/inputs only (default: all visible elements)',
+        },
+        scope: {
+          type: "string",
+          enum: ["viewport", "page"],
+          description:
+            'Which part of the page to include: "viewport" (default) or "page" for the whole document, so off-screen targets can be found without scrolling first.',
         },
         depth: {
           type: "number",
@@ -1325,7 +1331,7 @@ export const TOOL_SCHEMAS: Tool[] = [
             y: { type: "number", description: "Y coordinate" },
           },
           description:
-            "Coordinates for actions (in screenshot space if a recent screenshot was taken, otherwise viewport). Required for click/scroll and as end point for drag.",
+            "Coordinates for actions (in screenshot space if a recent screenshot was taken, otherwise viewport). Required for coordinate clicks and as end point for drag; optional for scroll (defaults to the viewport center).",
         },
         startCoordinates: {
           type: "object",
