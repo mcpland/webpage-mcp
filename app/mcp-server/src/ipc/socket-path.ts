@@ -43,6 +43,34 @@ export function getNativeSocketPath(): string {
   return getDefaultUnixSocketPath();
 }
 
+/**
+ * Longest Unix domain socket path in bytes (sockaddr_un.sun_path minus the
+ * terminating NUL): 104 bytes on macOS/BSD, 108 on Linux.
+ */
+export function getUnixSocketPathByteLimit(platform: NodeJS.Platform = process.platform): number {
+  return platform === 'linux' ? 107 : 103;
+}
+
+/**
+ * Throw a descriptive error for a socket path the OS cannot bind or connect.
+ * Without this check the native host only fails with `listen EINVAL` and the
+ * extension reports an unexplained "Native host has exited".
+ */
+export function assertNativeSocketPathFits(
+  socketPath: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform === 'win32') return; // named pipes have no sun_path limit
+  const bytes = Buffer.byteLength(socketPath, 'utf8');
+  const limit = getUnixSocketPathByteLimit(platform);
+  if (bytes > limit) {
+    throw new Error(
+      `Native IPC socket path is ${bytes} bytes, longer than the ${limit}-byte Unix socket limit: ${socketPath}. ` +
+        `Point ${SOCKET_ENV} (or ${SOCKET_DIR_ENV}) at a shorter path.`,
+    );
+  }
+}
+
 export function ensureNativeSocketParentDir(socketPath = getNativeSocketPath()): void {
   if (process.platform === 'win32') {
     return;

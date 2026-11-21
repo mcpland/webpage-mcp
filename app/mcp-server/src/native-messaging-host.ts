@@ -17,6 +17,7 @@ import { TIMEOUTS } from './constant';
 import fileHandler from './file-handler';
 import type { RealtimeEvent } from './agent/types';
 import {
+  assertNativeSocketPathFits,
   ensureNativeSocketParentDir,
   getLegacyNativeSocketPath,
   getNativeSocketPath,
@@ -314,6 +315,7 @@ export class NativeMessagingHost {
     const socketPath = getNativeSocketPath();
 
     if (process.platform !== 'win32') {
+      assertNativeSocketPathFits(socketPath);
       ensureNativeSocketParentDir(socketPath);
       const preparation = await prepareUnixSocketPath(socketPath);
       if (preparation === 'active') {

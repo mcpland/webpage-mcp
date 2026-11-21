@@ -1,6 +1,10 @@
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { getLegacyNativeSocketPath, getNativeSocketPath } from '../ipc/socket-path';
+import {
+  assertNativeSocketPathFits,
+  getLegacyNativeSocketPath,
+  getNativeSocketPath,
+} from '../ipc/socket-path';
 import { IPC_AUTH_METHOD, readNativeIpcCredential } from '../ipc/bridge-auth';
 import { BoundedNdjsonDecoder } from '../ipc/bounded-ndjson';
 import { IPC_CANCEL_REQUEST_METHOD } from '../ipc/bridge-protocol';
@@ -179,6 +183,12 @@ export class NativeIpcBridgeClient {
 
   private connectOnce(socketPath: string): Promise<void> {
     if (this.closed) return Promise.reject(createClientClosedError());
+
+    try {
+      assertNativeSocketPathFits(socketPath);
+    } catch (error) {
+      return Promise.reject(error);
+    }
 
     return new Promise<void>((resolve, reject) => {
       const socket = net.createConnection(socketPath);
