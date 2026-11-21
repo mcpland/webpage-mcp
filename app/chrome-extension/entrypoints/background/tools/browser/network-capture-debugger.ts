@@ -4,6 +4,8 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { NETWORK_FILTERS } from '@/common/constants';
 import {
+  canAttachBeforeNavigation,
+  fillMissingCaptureTabTitle,
   NETWORK_CAPTURE_LIMITS,
   boundCaptureResult,
   jsonByteLength,
@@ -173,6 +175,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       rootTabId?: number;
       lineageDepth?: number;
       deadlineAt?: number;
+      /** The page the tab is about to load, recorded instead of its current blank page. */
+      pageUrl?: string;
     },
   ): Promise<void> {
     this.pruneCompletedCaptures();
@@ -221,8 +225,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       // Initialize capture data
       this.captureData.set(tabId, {
         startTime: Date.now(),
-        tabUrl: truncateUtf8(tab.url, NETWORK_CAPTURE_LIMITS.maxUrlBytes),
-        tabTitle: truncateUtf8(tab.title, 1_024),
+        tabUrl: truncateUtf8(options.pageUrl ?? tab.url, NETWORK_CAPTURE_LIMITS.maxUrlBytes),
+        tabTitle: options.pageUrl ? '' : truncateUtf8(tab.title, 1_024),
         maxCaptureTime,
         inactivityTimeout,
         includeStatic,
@@ -948,6 +952,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     if (isAutoStop) {
       this.cacheCompletedCapture(tabId, result);
     }
+    await fillMissingCaptureTabTitle(tabId, resultData);
     return result;
   }
 
@@ -1056,8 +1061,15 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
 
     try {
       const explicitTab = await this.tryGetTab(targetTabId);
+      // The page at targetUrl is loaded only once the debugger is attached;
+      // loading it first lost its earliest requests, often the ones that matter.
+      let loadAfterStart: string | undefined;
       if (targetUrl) {
-        if (explicitTab?.id) {
+        if (explicitTab?.id && canAttachBeforeNavigation(explicitTab.url)) {
+          tabToOperateOn = explicitTab;
+          loadAfterStart = targetUrl;
+        } else if (explicitTab?.id) {
+          // Pages such as chrome://newtab refuse the debugger, so load the URL first.
           tabToOperateOn = await chrome.tabs.update(explicitTab.id, { url: targetUrl });
         } else {
           const existingTabs = await chrome.tabs.query({
@@ -1067,13 +1079,11 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
             tabToOperateOn = existingTabs[0];
           } else {
             tabToOperateOn = await chrome.tabs.create({
-              url: targetUrl,
+              url: 'about:blank',
               active: background !== true,
               windowId,
             });
-            // Wait for tab to be somewhat ready. A better way is to listen to tabs.onUpdated status='complete'
-            // but for debugger attachment, it just needs the tabId.
-            await new Promise((resolve) => setTimeout(resolve, 500)); // Short delay
+            loadAfterStart = targetUrl;
           }
         }
 
@@ -1110,11 +1120,23 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
           rootTabId: tabId,
           lineageDepth: 0,
           deadlineAt: Date.now() + maxCaptureTime,
+          pageUrl: loadAfterStart,
         });
       } catch (error: any) {
         return createErrorResponse(
           `Failed to start capture for tab ${tabId}: ${error.message || String(error)}`,
         );
+      }
+
+      if (loadAfterStart) {
+        try {
+          await chrome.tabs.update(tabId, { url: loadAfterStart });
+        } catch (error: any) {
+          await this.stopCapture(tabId);
+          return createErrorResponse(
+            `Failed to load the URL in tab ${tabId}: ${error.message || String(error)}`,
+          );
+        }
       }
 
       return {
@@ -1125,7 +1147,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
               success: true,
               message: `Network capture started on tab ${tabId}. Waiting for stop command or timeout.`,
               tabId,
-              url: tabToOperateOn.url,
+              url: loadAfterStart ?? tabToOperateOn.url,
               maxCaptureTime,
               inactivityTimeout,
               includeStatic,

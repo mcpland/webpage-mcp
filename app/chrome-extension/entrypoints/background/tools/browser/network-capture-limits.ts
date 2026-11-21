@@ -177,3 +177,28 @@ export function boundCaptureResult<T extends { requests: unknown[] }>(
   }
   return bounded;
 }
+
+/**
+ * A capture that opened its page itself starts before the page has a title;
+ * read the title from the live tab when the capture ends (no-op if it closed).
+ */
+export async function fillMissingCaptureTabTitle(
+  tabId: number,
+  data: { tabTitle?: string },
+): Promise<void> {
+  if (data.tabTitle) return;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab?.title) data.tabTitle = truncateUtf8(tab.title, 1_024);
+  } catch {
+    // The tab is gone; keep the empty title.
+  }
+}
+
+/**
+ * Whether the debugger can attach to the tab's current page before it is
+ * navigated elsewhere (chrome:// and similar pages refuse attachment).
+ */
+export function canAttachBeforeNavigation(url: string | undefined): boolean {
+  return /^(https?:\/\/|about:blank(?:[?#]|$))/i.test(String(url || ''));
+}

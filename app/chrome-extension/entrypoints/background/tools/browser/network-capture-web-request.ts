@@ -3,6 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { LIMITS, NETWORK_FILTERS } from '@/common/constants';
 import {
+  fillMissingCaptureTabTitle,
   NETWORK_CAPTURE_LIMITS,
   boundCaptureResult,
   jsonByteLength,
@@ -730,6 +731,8 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       rootTabId?: number;
       lineageDepth?: number;
       deadlineAt?: number;
+      /** The page the tab is about to load, recorded instead of its current blank page. */
+      pageUrl?: string;
     },
   ): Promise<void> {
     this.pruneCompletedCaptures();
@@ -761,8 +764,8 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       // Initialize capture data
       this.captureData.set(tabId, {
         tabId: tabId,
-        tabUrl: truncateUtf8(tab.url, NETWORK_CAPTURE_LIMITS.maxUrlBytes),
-        tabTitle: truncateUtf8(tab.title, 1_024),
+        tabUrl: truncateUtf8(options.pageUrl ?? tab.url, NETWORK_CAPTURE_LIMITS.maxUrlBytes),
+        tabTitle: options.pageUrl ? '' : truncateUtf8(tab.title, 1_024),
         startTime: Date.now(),
         requests: {},
         maxCaptureTime,
@@ -906,6 +909,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       if (isAutoStop) {
         this.cacheCompletedCapture(tabId, result);
       }
+      await fillMissingCaptureTabTitle(tabId, resultData);
       return result;
     } catch (error: any) {
       console.error(`NetworkCaptureV2: Error stopping capture for tab ${tabId}:`, error);
@@ -1000,13 +1004,14 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       // Get current tab or create new tab
       let tabToOperateOn: chrome.tabs.Tab;
 
+      // The page at targetUrl is loaded only once the capture is listening;
+      // loading it first lost its earliest requests, often the ones that matter.
+      let loadAfterStart: string | undefined;
+
       if (targetUrl) {
         if (explicitTab?.id) {
-          const updatedTab = await chrome.tabs.update(explicitTab.id, { url: targetUrl });
-          if (!updatedTab) {
-            return createErrorResponse(`Failed to update target tab ${explicitTab.id}`);
-          }
-          tabToOperateOn = updatedTab;
+          tabToOperateOn = explicitTab;
+          loadAfterStart = targetUrl;
         } else {
           // Find tabs matching the URL
           const matchingTabs = await chrome.tabs.query({ url: targetUrl });
@@ -1016,16 +1021,13 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
             tabToOperateOn = matchingTabs[0];
             console.log(`NetworkCaptureV2: Found existing tab with URL: ${truncateUtf8(targetUrl, 512)}`);
           } else {
-            // Create new tab
             console.log(`NetworkCaptureV2: Creating new tab with URL: ${truncateUtf8(targetUrl, 512)}`);
             tabToOperateOn = await chrome.tabs.create({
-              url: targetUrl,
+              url: 'about:blank',
               active: background !== true,
               windowId,
             });
-
-            // Wait for page to load
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            loadAfterStart = targetUrl;
           }
         }
 
@@ -1060,11 +1062,23 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
           rootTabId: tabToOperateOn.id,
           lineageDepth: 0,
           deadlineAt: Date.now() + maxCaptureTime,
+          pageUrl: loadAfterStart,
         });
       } catch (error: any) {
         return createErrorResponse(
           `Failed to start capture for tab ${tabToOperateOn.id}: ${error.message || String(error)}`,
         );
+      }
+
+      if (loadAfterStart) {
+        try {
+          await chrome.tabs.update(tabToOperateOn.id, { url: loadAfterStart });
+        } catch (error: any) {
+          await this.stopCapture(tabToOperateOn.id);
+          return createErrorResponse(
+            `Failed to load the URL in tab ${tabToOperateOn.id}: ${error.message || String(error)}`,
+          );
+        }
       }
 
       return {
@@ -1075,7 +1089,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
               success: true,
               message: 'Network capture V2 started successfully, waiting for stop command.',
               tabId: tabToOperateOn.id,
-              url: tabToOperateOn.url,
+              url: loadAfterStart ?? tabToOperateOn.url,
               maxCaptureTime,
               inactivityTimeout,
               includeStatic,
