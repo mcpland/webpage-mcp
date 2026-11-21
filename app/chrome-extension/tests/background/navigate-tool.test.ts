@@ -22,6 +22,7 @@ vi.mock('@/entrypoints/background/tools/browser/gif-recorder', () => ({
 }));
 
 import { navigateTool } from '@/entrypoints/background/tools/browser/common';
+import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
 
 function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
@@ -590,6 +591,59 @@ describe('navigateTool', () => {
     expect(mocks.tabsReload).toHaveBeenCalledWith(7);
     expect(polls).toBeGreaterThan(3);
     expect(payload).toMatchObject({ message: 'Successfully refreshed current tab', status: 'complete' });
+  });
+
+  it('appends a page snapshot when includeSnapshot is set', async () => {
+    const readPage = vi.spyOn(readPageTool, 'execute').mockResolvedValue({
+      content: [{ type: 'text', text: '{"success":true,"pageContent":"- link [ref=ref_1]"}' }],
+      isError: false,
+    });
+    mocks.tabsCreate.mockResolvedValueOnce(
+      makeTab({ id: 88, windowId: 20, url: 'https://example.com/', status: 'complete' }),
+    );
+    mocks.tabsGet.mockResolvedValue(
+      makeTab({ id: 88, windowId: 20, url: 'https://example.com/', status: 'complete' }),
+    );
+
+    const result = await navigateTool.execute({
+      url: 'https://example.com/',
+      includeSnapshot: true,
+    });
+
+    expect(readPage).toHaveBeenCalledWith({ tabId: 88, background: true, filter: 'interactive' });
+    expect(result.content).toHaveLength(2);
+    expect(String((result.content[1] as { text?: string }).text)).toContain('[ref=ref_1]');
+    expect(getTextPayload(result).tabId).toBe(88);
+  });
+
+  it('keeps the navigation result when the snapshot fails', async () => {
+    vi.spyOn(readPageTool, 'execute').mockResolvedValue({
+      content: [{ type: 'text', text: 'Failed to generate accessibility tree' }],
+      isError: true,
+    });
+    mocks.tabsCreate.mockResolvedValueOnce(
+      makeTab({ id: 89, windowId: 20, url: 'https://example.com/', status: 'complete' }),
+    );
+    mocks.tabsGet.mockResolvedValue(
+      makeTab({ id: 89, windowId: 20, url: 'https://example.com/', status: 'complete' }),
+    );
+
+    const result = await navigateTool.execute({
+      url: 'https://example.com/',
+      includeSnapshot: { scope: 'page' },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(String((result.content[1] as { text?: string }).text)).toContain('snapshotError');
+  });
+
+  it('rejects malformed includeSnapshot options', async () => {
+    const result = await navigateTool.execute({
+      url: 'https://example.com/',
+      includeSnapshot: { scope: 'everything' } as any,
+    });
+    expect(result.isError).toBe(true);
+    expect(mocks.tabsCreate).not.toHaveBeenCalled();
   });
 
   it('opens a new tab when default current tab is not an HTTP page', async () => {

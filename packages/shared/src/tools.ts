@@ -1597,6 +1597,20 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'When to return: "load" (default) waits until the page finished loading (up to 20s; the result reports `status` and a warning if it is still loading); "commit" returns as soon as the new URL is committed.',
         },
+        includeSnapshot: {
+          description:
+            'Also return the page\'s accessibility tree (as chrome_read_page would) so it can be acted on without another call. true returns the interactive elements in the viewport; pass { "filter": "all" | "interactive", "scope": "viewport" | "page" } to customize.',
+          oneOf: [
+            { type: "boolean" },
+            {
+              type: "object",
+              properties: {
+                filter: { type: "string", enum: ["all", "interactive"] },
+                scope: { type: "string", enum: ["viewport", "page"] },
+              },
+            },
+          ],
+        },
       },
       required: [],
     },

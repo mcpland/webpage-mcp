@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { captureFrameOnAction, isAutoCaptureActive } from './gif-recorder';
+import { readPageTool } from './read-page';
 
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -29,6 +30,40 @@ interface NavigateToolParams {
   windowId?: number;
   background?: boolean; // when true, do not activate tab or focus window
   waitUntil?: NavigationWaitUntil; // 'load' (default) or 'commit'
+  includeSnapshot?: boolean | { filter?: 'interactive'; scope?: 'viewport' | 'page' };
+}
+
+type SnapshotOptions = { filter?: 'interactive'; scope?: 'viewport' | 'page' };
+
+function parseSnapshotOptions(value: unknown): SnapshotOptions | undefined | Error {
+  if (value === undefined || value === null || value === false) return undefined;
+  // A compact interactive tree is what an agent needs to act next.
+  if (value === true) return { filter: 'interactive' };
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if (record.filter !== undefined && record.filter !== 'interactive' && record.filter !== 'all') {
+      return new Error('includeSnapshot.filter must be "interactive" or "all"');
+    }
+    if (record.scope !== undefined && record.scope !== 'viewport' && record.scope !== 'page') {
+      return new Error('includeSnapshot.scope must be "viewport" or "page"');
+    }
+    return {
+      ...(record.filter === 'interactive' ? { filter: 'interactive' as const } : {}),
+      ...(record.scope ? { scope: record.scope as 'viewport' | 'page' } : {}),
+    };
+  }
+  return new Error('includeSnapshot must be a boolean or { filter, scope }');
+}
+
+function navigatedTabId(result: ToolResult): number | undefined {
+  try {
+    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
+    if (typeof payload.tabId === 'number') return payload.tabId;
+    const firstTab = Array.isArray(payload.tabs) ? payload.tabs[0] : undefined;
+    return typeof firstTab?.tabId === 'number' ? firstTab.tabId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function hasDisallowedPublicUrlScheme(url: string): boolean {
@@ -340,6 +375,24 @@ class NavigateTool extends BaseBrowserToolExecutor {
   }
 
   async execute(args: NavigateToolParams): Promise<ToolResult> {
+    const snapshot = parseSnapshotOptions(args?.includeSnapshot);
+    if (snapshot instanceof Error) return createErrorResponse(snapshot.message);
+    const result = await this.navigate(args);
+    if (!snapshot || result.isError) return result;
+    // Opening a page is almost always followed by reading it; do both in one call.
+    const tabId = navigatedTabId(result);
+    if (typeof tabId !== 'number') return result;
+    const tree = await readPageTool.execute({ tabId, background: true, ...snapshot });
+    const snapshotBlock = tree.isError
+      ? {
+          type: 'text' as const,
+          text: JSON.stringify({ snapshotError: (tree.content[0] as { text?: string })?.text }),
+        }
+      : tree.content[0];
+    return { ...result, content: [...result.content, snapshotBlock] };
+  }
+
+  private async navigate(args: NavigateToolParams): Promise<ToolResult> {
     const {
       openMode,
       newTab = false,
