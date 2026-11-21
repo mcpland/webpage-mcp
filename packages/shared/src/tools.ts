@@ -1814,7 +1814,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE,
     description:
-      'Unified network capture tool for HTTP(S) pages. Use action="start" to begin capturing, action="stop" to end and retrieve results. Set needResponseBody=true to capture response bodies (uses Debugger API, may conflict with DevTools). Default mode uses webRequest API (lightweight, no debugger conflict, but no response body).',
+      'Unified network capture tool for HTTP(S) pages. Use action="start" to begin capturing, action="stop" to end and retrieve results, or action="start" with durationMs to capture for a fixed time and get the results in the same call. Set needResponseBody=true to capture response bodies (uses Debugger API, may conflict with DevTools). Default mode uses webRequest API (lightweight, no debugger conflict, but no response body).',
     inputSchema: {
       type: "object",
       properties: {
@@ -1841,7 +1841,14 @@ export const TOOL_SCHEMAS: Tool[] = [
         inactivityTimeout: {
           type: "number",
           description:
-            "Stop after inactivity in milliseconds (default: 60000). Set 0 to disable.",
+            "Stop after this many milliseconds without new requests (default: 60000, minimum: 1000; never longer than maxCaptureTime).",
+        },
+        durationMs: {
+          type: "number",
+          minimum: 100,
+          maximum: 600000,
+          description:
+            'For action="start": capture for this many milliseconds, then stop and return the results in the same call (one-shot; combine with url to capture a page load). Returns early if the capture ends on its own (maxCaptureTime, inactivityTimeout). Other tools on the same tab wait until it finishes, so use separate start/stop calls to capture traffic caused by your own interactions.',
         },
         includeStatic: {
           type: "boolean",

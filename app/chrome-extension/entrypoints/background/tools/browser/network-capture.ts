@@ -22,7 +22,17 @@ interface NetworkCaptureToolParams {
   windowId?: number;
   background?: boolean;
   all?: boolean;
+  durationMs?: number;
 }
+
+interface NetworkCaptureExecutionContext {
+  signal?: AbortSignal;
+}
+
+const ONE_SHOT_MIN_DURATION_MS = 100;
+/** Keeps the capture's own time limit from racing the one-shot's explicit stop. */
+const ONE_SHOT_STOP_MARGIN_MS = 5_000;
+const ONE_SHOT_POLL_MS = 200;
 
 const NETWORK_CAPTURE_PUBLIC_PAGE_ERROR =
   'Only http:// and https:// pages are supported by chrome_network_capture';
@@ -141,6 +151,58 @@ function isDebuggerCaptureActive(): boolean {
   return captureData instanceof Map && captureData.size > 0;
 }
 
+function parseJsonObject(text: string | undefined): Record<string, unknown> | undefined {
+  if (typeof text !== 'string') return undefined;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether the capture started on this tab is still recording (not stopped or auto-stopped). */
+function isTabCaptureRecording(tabId: number, backend: NetworkCaptureBackend): boolean {
+  const owner = backend === 'debugger' ? networkDebuggerStartTool : networkCaptureStartTool;
+  const captureData = (owner as unknown as { captureData?: Map<number, unknown> }).captureData;
+  return captureData instanceof Map && captureData.has(tabId);
+}
+
+/**
+ * Resolve after durationMs, or earlier when the capture ends on its own
+ * (maxCaptureTime, inactivityTimeout, tab closed) or the tool call is aborted.
+ */
+function waitForOneShotCapture(
+  tabId: number,
+  backend: NetworkCaptureBackend,
+  durationMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + durationMs;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const tick = (): void => {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || !isTabCaptureRecording(tabId, backend)) {
+        finish();
+        return;
+      }
+      timer = setTimeout(tick, Math.min(ONE_SHOT_POLL_MS, remaining));
+    };
+    if (signal?.aborted) {
+      finish();
+      return;
+    }
+    signal?.addEventListener('abort', finish, { once: true });
+    timer = setTimeout(tick, Math.min(ONE_SHOT_POLL_MS, durationMs));
+  });
+}
+
 /**
  * Check if webRequest-based capture is active
  */
@@ -161,10 +223,16 @@ function isWebRequestCaptureActive(): boolean {
 class NetworkCaptureTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.NETWORK_CAPTURE;
 
-  async execute(args: NetworkCaptureToolParams): Promise<ToolResult> {
+  async execute(
+    args: NetworkCaptureToolParams,
+    context?: NetworkCaptureExecutionContext,
+  ): Promise<ToolResult> {
     const action = args?.action;
     if (action !== 'start' && action !== 'stop') {
       return createErrorResponse('Parameter [action] is required and must be one of: start, stop');
+    }
+    if (args.durationMs !== undefined && action !== 'start') {
+      return createErrorResponse('durationMs is only supported with action="start".');
     }
 
     const wantBody = args?.needResponseBody === true;
@@ -172,10 +240,63 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
     const webActive = isWebRequestCaptureActive();
 
     if (action === 'start') {
+      if (args.durationMs !== undefined) {
+        return this.handleOneShot(args, wantBody, debuggerActive, webActive, context?.signal);
+      }
       return this.handleStart(args, wantBody, debuggerActive, webActive);
     }
 
     return this.handleStop(args, debuggerActive, webActive);
+  }
+
+  /**
+   * start -> wait -> stop in a single call, so capturing the traffic of a page
+   * load (or of a page's own polling) takes one tool call instead of three.
+   */
+  private async handleOneShot(
+    args: NetworkCaptureToolParams,
+    wantBody: boolean,
+    debuggerActive: boolean,
+    webActive: boolean,
+    signal?: AbortSignal,
+  ): Promise<ToolResult> {
+    const durationMs = args.durationMs;
+    if (
+      typeof durationMs !== 'number' ||
+      !Number.isFinite(durationMs) ||
+      durationMs < ONE_SHOT_MIN_DURATION_MS ||
+      durationMs > NETWORK_CAPTURE_LIMITS.maxCaptureTimeMs
+    ) {
+      return createErrorResponse(
+        `durationMs must be a number between ${ONE_SHOT_MIN_DURATION_MS} and ${NETWORK_CAPTURE_LIMITS.maxCaptureTimeMs}.`,
+      );
+    }
+
+    const startResult = await this.handleStart(
+      {
+        ...args,
+        maxCaptureTime: args.maxCaptureTime ?? durationMs + ONE_SHOT_STOP_MARGIN_MS,
+      },
+      wantBody,
+      debuggerActive,
+      webActive,
+    );
+    if (startResult.isError) return startResult;
+    const tabId = parseJsonObject(getFirstText(startResult))?.tabId;
+    if (typeof tabId !== 'number') return startResult;
+
+    const backend: NetworkCaptureBackend = wantBody ? 'debugger' : 'webRequest';
+    const startedAt = Date.now();
+    // Even when the wait is cut short (abort), stop the capture so it is not left running.
+    await waitForOneShotCapture(tabId, backend, Math.floor(durationMs), signal);
+    const waitedMs = Date.now() - startedAt;
+
+    const stopResult = await this.handleStop(
+      { action: 'stop', tabId, needResponseBody: wantBody },
+      isDebuggerCaptureActive(),
+      isWebRequestCaptureActive(),
+    );
+    return decorateJsonResult(stopResult, { oneShot: true, durationMs, waitedMs });
   }
 
   private async handleStart(
