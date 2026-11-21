@@ -57,7 +57,11 @@ interface ConsoleToolParams {
   pattern?: string;
   onlyErrors?: boolean;
   limit?: number;
+  waitMs?: number; // snapshot mode: how long to keep listening after replay
 }
+
+const DEFAULT_SNAPSHOT_WAIT_MS = 2000;
+const MAX_SNAPSHOT_WAIT_MS = 10_000;
 
 interface ConsoleMessage {
   timestamp: number;
@@ -391,7 +395,19 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       pattern,
       onlyErrors = false,
       limit,
+      waitMs = DEFAULT_SNAPSHOT_WAIT_MS,
     } = args;
+
+    if (
+      typeof waitMs !== 'number' ||
+      !Number.isFinite(waitMs) ||
+      waitMs < 0 ||
+      waitMs > MAX_SNAPSHOT_WAIT_MS
+    ) {
+      return createErrorResponse(
+        `waitMs must be a number between 0 and ${MAX_SNAPSHOT_WAIT_MS}`,
+      );
+    }
 
     let targetTab: chrome.tabs.Tab;
     let targetTabId: number | undefined;
@@ -601,6 +617,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
 
       // Snapshot Mode (one-shot capture)
       const result = await this.captureConsoleMessages(targetTabId, {
+        waitMs,
         includeExceptions,
         maxMessages: effectiveLimit,
         maxExceptions: normalizedMaxExceptions,
@@ -702,9 +719,11 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       includeExceptions: boolean;
       maxMessages: number;
       maxExceptions: number;
+      waitMs?: number;
     },
   ): Promise<ConsoleResult> {
     const { includeExceptions, maxMessages, maxExceptions } = options;
+    const waitMs = options.waitMs ?? DEFAULT_SNAPSHOT_WAIT_MS;
     const startTime = Date.now();
     const messageRing: ByteRingState<ConsoleMessage> = {
       entries: [],
@@ -794,7 +813,10 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       try {
         await cdpSessionManager.sendCommand(tabId, 'Runtime.enable');
         await cdpSessionManager.sendCommand(tabId, 'Log.enable');
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        // Enabling the domains replays messages logged so far; waitMs only
+        // controls how long to keep listening for new ones (0 still yields
+        // once so the replayed events are delivered).
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
       } finally {
         if (listenerActive) {
           chrome.debugger.onEvent.removeListener(eventListener);

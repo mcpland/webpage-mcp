@@ -2392,7 +2392,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.CONSOLE,
     description:
-      "Capture console output from an HTTP(S) browser tab. Supports snapshot mode (default; one-time capture with ~2s wait) and buffer mode (persistent per-tab buffer you can read/clear instantly without waiting).",
+      "Capture console output from an HTTP(S) browser tab. Supports snapshot mode (default; one-time capture of messages logged so far plus a short listening window, see waitMs) and buffer mode (persistent per-tab buffer you can read/clear instantly without waiting).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2470,6 +2470,13 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: "number",
           description:
             "Limit returned console messages (hard maximum: 500). In snapshot mode this is an alias for maxMessages; in buffer mode it limits returned messages from the buffer.",
+        },
+        waitMs: {
+          type: "number",
+          minimum: 0,
+          maximum: 10000,
+          description:
+            "Snapshot mode only: how long to keep listening for new messages after the ones logged so far are replayed (default 2000). Use 0 for an immediate snapshot.",
         },
       },
       required: [],

@@ -449,6 +449,44 @@ describe('consoleTool', () => {
     expect(clear).not.toHaveBeenCalled();
   });
 
+  it('returns an immediate snapshot of replayed messages when waitMs is 0', async () => {
+    vi.useFakeTimers();
+    (chrome.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeTab());
+    let eventListener:
+      | ((source: chrome.debugger.Debuggee, method: string, params?: unknown) => void)
+      | undefined;
+    (chrome.debugger.onEvent.addListener as ReturnType<typeof vi.fn>).mockImplementation(
+      (listener) => {
+        eventListener = listener;
+      },
+    );
+    vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'sendCommand').mockImplementation(async (_tabId, method) => {
+      // Enabling Log replays what the page already logged.
+      if (method === 'Log.enable') {
+        eventListener?.({ tabId: 7 }, 'Log.entryAdded', {
+          entry: { timestamp: 1, level: 'error', text: 'boom earlier' },
+        });
+      }
+      return {};
+    });
+
+    const promise = consoleTool.execute({ tabId: 7, waitMs: 0 });
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await promise;
+    const payload = JSON.parse(String((result.content[0] as { text?: string }).text));
+
+    expect(result.isError).toBe(false);
+    expect(JSON.stringify(payload)).toContain('boom earlier');
+  });
+
+  it('rejects out-of-range waitMs values', async () => {
+    const result = await consoleTool.execute({ tabId: 7, waitMs: 60_000 });
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string }).text)).toContain('waitMs');
+  });
+
   it('bounds snapshot counts, bytes, and event work while events arrive', async () => {
     vi.useFakeTimers();
     const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
