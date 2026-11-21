@@ -56,6 +56,59 @@ describe('computerTool', () => {
     },
   );
 
+  it.each(['type', 'key'] as const)(
+    'does not %s into the focused element when the ref cannot be focused',
+    async (action) => {
+      vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+      vi.spyOn(clickTool, 'execute').mockResolvedValue({
+        content: [{ type: 'text', text: 'ref "ref_9" not found or expired' }],
+        isError: true,
+      });
+      vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+      vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
+      const sendCommand = vi.spyOn(cdpSessionManager, 'sendCommand').mockResolvedValue({});
+
+      const result = await computerTool.execute({
+        tabId: 7,
+        action,
+        ref: 'ref_9',
+        text: action === 'type' ? 'WRONG' : 'Enter',
+      } as any);
+
+      expect(result.isError).toBe(true);
+      expect(String((result.content[0] as { text?: string }).text)).toContain(
+        'not found or expired',
+      );
+      expect(sendCommand).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reports per-element fill_form errors and fails when nothing was filled', async () => {
+    vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    const fill = vi.spyOn(fillTool, 'execute').mockResolvedValue({
+      content: [{ type: 'text', text: 'Element not found: #missing' }],
+      isError: true,
+    });
+
+    const result = await computerTool.execute({
+      tabId: 7,
+      action: 'fill_form',
+      elements: [
+        { ref: 'ref_1', value: 'a' },
+        { selector: '#missing', value: 'b' },
+        { value: 'c' },
+      ],
+    } as any);
+    const payload = JSON.parse(String((result.content[0] as { text?: string }).text));
+
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({ success: false, filled: 0, total: 3 });
+    expect(payload.results[0]).toEqual({ ref: 'ref_1', ok: false, error: 'Element not found: #missing' });
+    expect(payload.results[1]).toMatchObject({ selector: '#missing', ok: false });
+    expect(payload.results[2]).toEqual({ ok: false, error: 'missing ref or selector' });
+    expect(fill.mock.calls[1][0]).toMatchObject({ selector: '#missing' });
+  });
+
   it('rejects file URL tabs before zoom screenshots', async () => {
     const tryGetTab = vi
       .spyOn(computerTool as any, 'tryGetTab')

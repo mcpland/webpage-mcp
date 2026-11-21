@@ -1357,7 +1357,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         elements: {
           type: "array",
           description:
-            "For action=fill_form: list of elements to fill (ref + value)",
+            "For action=fill_form: list of elements to fill, each with a ref or a selector plus a value. Per-element errors are reported in results; the call fails only when no element could be filled.",
           items: {
             type: "object",
             properties: {
@@ -1365,12 +1365,21 @@ export const TOOL_SCHEMAS: Tool[] = [
                 type: "string",
                 description: "Element ref from chrome_read_page",
               },
+              selector: {
+                type: "string",
+                description: "CSS selector or XPath (alternative to ref)",
+              },
+              selectorType: {
+                type: "string",
+                enum: ["css", "xpath"],
+                description: 'Type of selector (default: "css")',
+              },
               value: {
                 type: "string",
                 description: "Value to set (stringified if non-string)",
               },
             },
-            required: ["ref", "value"],
+            required: ["value"],
           },
         },
         width: {

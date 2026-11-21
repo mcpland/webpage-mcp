@@ -184,6 +184,13 @@ class CDPHelper {
   }
 }
 
+function firstResultText(result: ToolResult): string {
+  const block = result.content.find((item) => item.type === 'text') as
+    | { text?: string }
+    | undefined;
+  return typeof block?.text === 'string' ? block.text : '';
+}
+
 class ComputerTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.COMPUTER;
 
@@ -1020,9 +1027,10 @@ class ComputerTool extends BaseBrowserToolExecutor {
             'Text parameter is required for type action',
           );
         try {
-          // Optional focus via ref before typing
+          // Optional focus via ref before typing. Typing into whatever happens
+          // to be focused after a failed focus would silently edit the wrong field.
           if (params.ref) {
-            await clickTool.execute({
+            const focus = await clickTool.execute({
               ref: params.ref,
               frameId: params.frameId,
               waitForNavigation: false,
@@ -1031,6 +1039,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
               windowId: tab.windowId,
               background: params.background === true,
             });
+            if (focus.isError) {
+              return createErrorResponse(
+                `Could not focus ref "${params.ref}" before typing; nothing was typed. ${firstResultText(focus)}`,
+              );
+            }
           }
           await CDPHelper.attach(tab.id);
           // Use CDP insertText to avoid complex KeyboardEvent emulation for long text
@@ -1084,7 +1097,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
       }
       case 'fill_form': {
         const elements = (params as any).elements as Array<{
-          ref: string;
+          ref?: string;
+          selector?: string;
+          selectorType?: 'css' | 'xpath';
           value: string | number | boolean;
         }>;
         if (!Array.isArray(elements) || elements.length === 0) {
@@ -1092,19 +1107,26 @@ class ComputerTool extends BaseBrowserToolExecutor {
             'elements must be a non-empty array for fill_form',
           );
         }
-        const results: Array<{ ref: string; ok: boolean; error?: string }> = [];
+        const results: Array<{
+          ref?: string;
+          selector?: string;
+          ok: boolean;
+          error?: string;
+        }> = [];
         for (const item of elements) {
-          if (!item || !item.ref) {
-            results.push({
-              ref: String(item?.ref || ''),
-              ok: false,
-              error: 'missing ref',
-            });
+          const target = item?.ref
+            ? { ref: String(item.ref) }
+            : item?.selector
+              ? { selector: String(item.selector) }
+              : undefined;
+          if (!target) {
+            results.push({ ok: false, error: 'missing ref or selector' });
             continue;
           }
           try {
             const r = await fillTool.execute({
-              ref: item.ref as any,
+              ...target,
+              selectorType: item.selectorType,
               value: item.value as any,
               frameId: params.frameId,
               tabId: tab.id,
@@ -1113,13 +1135,13 @@ class ComputerTool extends BaseBrowserToolExecutor {
             } as any);
             const ok = !r.isError;
             results.push({
-              ref: item.ref,
+              ...target,
               ok,
-              error: ok ? undefined : 'failed',
+              ...(ok ? {} : { error: firstResultText(r) || 'fill failed' }),
             });
           } catch (e) {
             results.push({
-              ref: item.ref,
+              ...target,
               ok: false,
               error: String(e instanceof Error ? e.message : e),
             });
@@ -1131,7 +1153,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             {
               type: 'text',
               text: JSON.stringify({
-                success: true,
+                success: successCount === results.length,
                 action: 'fill_form',
                 filled: successCount,
                 total: results.length,
@@ -1139,7 +1161,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
               }),
             },
           ],
-          isError: false,
+          // A form where nothing could be filled is a failed action.
+          isError: successCount === 0,
         };
       }
       case 'key': {
@@ -1164,7 +1187,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
         try {
           // Optional focus via ref before key events
           if (params.ref) {
-            await clickTool.execute({
+            const focus = await clickTool.execute({
               ref: params.ref,
               frameId: params.frameId,
               waitForNavigation: false,
@@ -1173,6 +1196,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
               windowId: tab.windowId,
               background: params.background === true,
             });
+            if (focus.isError) {
+              return createErrorResponse(
+                `Could not focus ref "${params.ref}" before sending keys; no keys were sent. ${firstResultText(focus)}`,
+              );
+            }
           }
           await CDPHelper.attach(tab.id);
           const dispatch = (event: Record<string, unknown>) =>
