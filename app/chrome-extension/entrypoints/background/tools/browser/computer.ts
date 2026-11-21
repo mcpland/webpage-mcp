@@ -581,6 +581,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             modifiers: params.modifiers,
             tabId: tab.id,
             windowId: tab.windowId,
+            background: params.background === true,
           });
           return domResult;
         }
@@ -596,6 +597,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             modifiers: params.modifiers,
             tabId: tab.id,
             windowId: tab.windowId,
+            background: params.background === true,
           });
           return domResult;
         }
@@ -636,6 +638,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           modifiers: params.modifiers,
           tabId: tab.id,
           windowId: tab.windowId,
+          background: params.background === true,
         });
         if (!domResult.isError) {
           return domResult; // Standardized response from click tool
@@ -1026,6 +1029,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               timeout: TIMEOUTS.DEFAULT_WAIT * 5,
               tabId: tab.id,
               windowId: tab.windowId,
+              background: params.background === true,
             });
           }
           await CDPHelper.attach(tab.id);
@@ -1054,6 +1058,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             selector: undefined,
             tabId: tab.id,
             windowId: tab.windowId,
+            background: params.background === true,
           });
           return res;
         }
@@ -1073,6 +1078,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           frameId: params.frameId,
           tabId: tab.id,
           windowId: tab.windowId,
+          background: params.background === true,
         } as any);
         return res;
       }
@@ -1103,6 +1109,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               frameId: params.frameId,
               tabId: tab.id,
               windowId: tab.windowId,
+              background: params.background === true,
             } as any);
             const ok = !r.isError;
             results.push({
@@ -1164,6 +1171,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               timeout: TIMEOUTS.DEFAULT_WAIT * 5,
               tabId: tab.id,
               windowId: tab.windowId,
+              background: params.background === true,
             });
           }
           await CDPHelper.attach(tab.id);
@@ -1202,6 +1210,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             frameId: params.frameId,
             tabId: tab.id,
             windowId: tab.windowId,
+            background: params.background === true,
           });
           return res;
         }

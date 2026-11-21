@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { computerTool } from '@/entrypoints/background/tools/browser/computer';
+import { clickTool, fillTool } from '@/entrypoints/background/tools/browser/interaction';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 const nativeMouseEvent = window.MouseEvent;
@@ -29,6 +30,31 @@ describe('computerTool', () => {
     document.body.innerHTML = '';
     vi.restoreAllMocks();
   });
+
+  it.each([
+    ['left_click', { ref: 'ref_3' }, 'click'],
+    ['right_click', { selector: '#menu' }, 'click'],
+    ['left_click', { coordinates: { x: 10, y: 20 } }, 'click'],
+    ['fill', { ref: 'ref_3', value: 'x' }, 'fill'],
+    ['type', { ref: 'ref_3', text: 'x' }, 'click'],
+  ] as const)(
+    'forwards background=true when %s delegates (%o)',
+    async (action, extra, delegate) => {
+      vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab({ active: false }));
+      const ok = { content: [{ type: 'text', text: '{"success":true}' }], isError: false };
+      const click = vi.spyOn(clickTool, 'execute').mockResolvedValue(ok as any);
+      const fill = vi.spyOn(fillTool, 'execute').mockResolvedValue(ok as any);
+      vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+      vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
+      vi.spyOn(cdpSessionManager, 'sendCommand').mockResolvedValue({});
+
+      await computerTool.execute({ tabId: 7, action, background: true, ...extra } as any);
+
+      const spy = delegate === 'click' ? click : fill;
+      expect(spy).toHaveBeenCalled();
+      expect(spy.mock.calls[0][0]).toMatchObject({ background: true, tabId: 7 });
+    },
+  );
 
   it('rejects file URL tabs before zoom screenshots', async () => {
     const tryGetTab = vi
