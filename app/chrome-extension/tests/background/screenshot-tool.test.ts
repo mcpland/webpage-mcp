@@ -63,6 +63,7 @@ describe('screenshotTool', () => {
 
     vi.stubGlobal('chrome', {
       tabs: {
+        onActivated: { addListener: vi.fn(), removeListener: vi.fn() },
         MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND: 2,
         captureVisibleTab: vi.fn(),
         get: vi.fn(),
@@ -478,6 +479,7 @@ describe('screenshotTool', () => {
     });
     vi.stubGlobal('OffscreenCanvas', canvasConstructor);
 
+    vi.mocked(chrome.tabs.get).mockResolvedValue(makeTab());
     const capture = await (screenshotTool as any)._captureFullPage(
       7,
       { fullPage: true, maxHeight },

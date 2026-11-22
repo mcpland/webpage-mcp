@@ -48,12 +48,9 @@ function withCaptureTimeout(promise: Promise<string>, timeoutMs: number): Promis
   });
 }
 
-/**
- * captureVisibleTab with extension-wide pacing. Pass `windowId` to capture a
- * specific window, or undefined for the current window.
- */
+/** Capture the requested tab only while it owns its window's visible surface. */
 export function captureVisibleTabPaced(
-  windowId: number | undefined,
+  tabId: number,
   options: chrome.tabs.CaptureVisibleTabOptions,
   timeoutMs = DEFAULT_CAPTURE_VISIBLE_TAB_TIMEOUT_MS,
 ): Promise<string> {
@@ -62,15 +59,27 @@ export function captureVisibleTabPaced(
     for (let attempt = 0; ; attempt += 1) {
       const wait = lastCaptureStartedAt + interval - Date.now();
       if (wait > 0) await sleep(wait);
-      lastCaptureStartedAt = Date.now();
+      const tab = await chrome.tabs.get(tabId);
+      const changedError = () => new Error('Screenshot target is no longer the active tab');
+      if (!tab.active) throw changedError();
+      let changed = false;
+      const onActivated = (info: chrome.tabs.TabActiveInfo) => {
+        if (info.windowId === tab.windowId) changed = true;
+      };
+      chrome.tabs.onActivated.addListener(onActivated);
       try {
-        const capture =
-          typeof windowId === 'number'
-            ? chrome.tabs.captureVisibleTab(windowId, options)
-            : chrome.tabs.captureVisibleTab(options);
-        return await withCaptureTimeout(capture, timeoutMs);
+        lastCaptureStartedAt = Date.now();
+        const image = await withCaptureTimeout(
+          chrome.tabs.captureVisibleTab(tab.windowId, options),
+          timeoutMs,
+        );
+        const after = await chrome.tabs.get(tabId);
+        if (changed || !after.active || after.windowId !== tab.windowId) throw changedError();
+        return image;
       } catch (error) {
         if (attempt >= MAX_QUOTA_RETRIES || !isQuotaError(error)) throw error;
+      } finally {
+        chrome.tabs.onActivated.removeListener(onActivated);
       }
     }
   };

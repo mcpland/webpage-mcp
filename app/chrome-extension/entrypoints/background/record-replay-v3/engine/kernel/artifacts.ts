@@ -152,17 +152,7 @@ export function createChromeArtifactService(options: {
           return { ok: true, base64 };
         }
 
-        // Get the window ID for the tab
-        const tab = await chrome.tabs.get(tabId);
-        if (!tab.windowId) {
-          return {
-            ok: false,
-            error: createRRError(RR_ERROR_CODES.INTERNAL, `Tab ${tabId} has no window`),
-          };
-        }
-
-        // Capture the visible tab
-        const dataUrl = await captureVisibleTabPaced(tab.windowId, {
+        const dataUrl = await captureVisibleTabPaced(tabId, {
           format,
           quality: format === 'jpeg' ? quality : undefined,
         });

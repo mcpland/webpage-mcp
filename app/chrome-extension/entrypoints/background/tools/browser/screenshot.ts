@@ -384,7 +384,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         } else {
           // Visible area only
           this.logInfo('Capturing visible area...');
-          finalImageDataUrl = await captureVisibleTabPaced(tab.windowId, { format: 'png' });
+          finalImageDataUrl = await captureVisibleTabPaced(tab.id!, { format: 'png' });
           assertScreenshotDataUrl(finalImageDataUrl, 'Visible screenshot data URL');
           let bitmap: ImageBitmap | undefined;
           try {
@@ -608,7 +608,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     // Small delay to ensure element is fully rendered after scrollIntoView
     await new Promise((resolve) => setTimeout(resolve, SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY));
 
-    const visibleCaptureDataUrl = await captureVisibleTabPaced(undefined, {
+    const visibleCaptureDataUrl = await captureVisibleTabPaced(tabId, {
       format: 'png',
     });
     if (!visibleCaptureDataUrl) {
@@ -734,7 +734,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         setTimeout(resolve, SCREENSHOT_CONSTANTS.CAPTURE_STITCH_DELAY_MS),
       );
 
-      const dataUrl = await captureVisibleTabPaced(undefined, { format: 'png' });
+      const dataUrl = await captureVisibleTabPaced(tabId, { format: 'png' });
       if (!dataUrl) throw new Error('captureVisibleTab returned empty during full page capture');
       assertScreenshotDataUrl(dataUrl, `Screenshot part ${partIndex + 1}`);
       capturedDataUrlBytes += dataUrl.length;

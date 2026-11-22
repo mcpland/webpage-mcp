@@ -34,7 +34,8 @@ describe('createChromeArtifactService', () => {
 
     vi.stubGlobal('chrome', {
       tabs: {
-        get: vi.fn().mockResolvedValue({ id: 7, windowId: 2 }),
+        onActivated: { addListener: vi.fn(), removeListener: vi.fn() },
+        get: vi.fn().mockResolvedValue({ id: 7, windowId: 2, active: true }),
         captureVisibleTab: vi.fn().mockResolvedValue('data:image/png;base64,visible-shot'),
       },
     });
