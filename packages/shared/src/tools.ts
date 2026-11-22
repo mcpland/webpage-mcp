@@ -1675,7 +1675,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         storeBase64: {
           type: "boolean",
           description:
-            "Return the screenshot as an inline image (JPEG, 70% scale) so it can be viewed (default: true).",
+            "Return the screenshot as an inline JPEG image (viewport CSS size up to 1568px on the long edge; 70% scale for fullPage/selector) so it can be viewed (default: true).",
         },
         fullPage: {
           type: "boolean",
@@ -2309,7 +2309,10 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             "Press Enter in the field after filling it, submitting search boxes, login forms and chat inputs in the same call (default: false).",
         },
-        dialog: DIALOG_RESPONSE_SCHEMA,
+        dialog: {
+          ...DIALOG_RESPONSE_SCHEMA,
+          description: `For submit=true: ${DIALOG_RESPONSE_SCHEMA.description}`,
+        },
       },
       required: ["value"],
     },
