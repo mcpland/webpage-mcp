@@ -1,3 +1,4 @@
+import { readScreenshotData } from '../screenshot-result';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { handleCallTool } from '@/entrypoints/background/tools';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
@@ -10,13 +11,6 @@ import {
   LOOP_ELEMENTS_RESOURCE_LIMITS,
 } from './loop-elements-resources';
 import { resolveNodeTabId } from './tab-context';
-
-function extractToolText(result: unknown): string | undefined {
-  const content = (result as { content?: Array<{ type?: string; text?: string }> })?.content;
-  const text = content?.find((item) => item?.type === 'text' && typeof item.text === 'string')
-    ?.text;
-  return typeof text === 'string' && text.trim() ? text : undefined;
-}
 
 export const handleDownloadNode: NodeRuntime<any> = {
   run: async (ctx, step) => {
@@ -49,27 +43,11 @@ export const screenshotNode: NodeRuntime<any> = {
     if (s.selector && typeof s.selector === 'string' && s.selector.trim())
       args.selector = s.selector;
     const res = await handleCallTool({ name: TOOL_NAMES.BROWSER.SCREENSHOT, args });
-    const text = extractToolText(res);
-    if ((res as { isError?: boolean })?.isError) {
-      throw new Error(text || 'screenshot failed');
+    if (res.isError || s.saveAs) {
+      const screenshot = readScreenshotData(res);
+      if ('error' in screenshot) throw new Error(screenshot.error);
+      ctx.vars[s.saveAs] = screenshot.data;
     }
-    if (!s.saveAs) {
-      return {} as ExecResult;
-    }
-    if (!text) {
-      throw new Error('screenshot tool returned an empty response');
-    }
-    let payload: unknown;
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      throw new Error('screenshot tool returned invalid JSON');
-    }
-    const base64Data = (payload as { base64Data?: unknown })?.base64Data;
-    if (typeof base64Data !== 'string' || !base64Data) {
-      throw new Error('screenshot tool returned empty base64Data');
-    }
-    ctx.vars[s.saveAs] = base64Data;
     return {} as ExecResult;
   },
 };

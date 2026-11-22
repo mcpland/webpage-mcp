@@ -15,6 +15,8 @@ import {
 } from '@/entrypoints/background/record-replay/nodes/download-screenshot-attr-event-frame-loop';
 import { createMockExecCtx } from './_test-helpers';
 
+import { screenshotHandler } from '@/entrypoints/background/record-replay/actions/handlers/screenshot';
+
 const TAB_ID = 7;
 
 describe('legacy screenshot node', () => {
@@ -46,6 +48,23 @@ describe('legacy screenshot node', () => {
         background: true,
       }),
     });
+  });
+
+  it('reads MCP image content in both workflow engines', async () => {
+    mocks.handleCallTool.mockResolvedValue({
+      content: [
+        { type: 'text', text: JSON.stringify({ mimeType: 'image/jpeg' }) },
+        { type: 'image', mimeType: 'image/jpeg', data: 'captured-image' },
+      ],
+    });
+    const ctx = createMockExecCtx({ tabId: TAB_ID });
+    await screenshotNode.run(ctx, { id: 'shot', type: 'screenshot', saveAs: 'legacy' } as never);
+    expect(ctx.vars.legacy).toBe('captured-image');
+    const result = await screenshotHandler.run(ctx as never, {
+      id: 'shot', type: 'screenshot', params: { saveAs: 'v3' },
+    });
+    expect(result).toEqual({ status: 'success', output: { base64Data: 'captured-image' } });
+    expect(ctx.vars.v3).toBe('captured-image');
   });
 
   it('throws when the screenshot tool returns an error', async () => {

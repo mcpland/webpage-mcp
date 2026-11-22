@@ -5,18 +5,12 @@
  * Supports full page, selector-based, and viewport screenshots.
  */
 
+import { readScreenshotData } from '../../screenshot-result';
 import { handleCallTool } from '@/entrypoints/background/tools';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { failed, invalid, ok } from '../registry';
 import type { ActionHandler } from '../types';
 import { resolveString } from './common';
-
-/** Extract text content from tool result */
-function extractToolText(result: unknown): string | undefined {
-  const content = (result as { content?: Array<{ type?: string; text?: string }> })?.content;
-  const text = content?.find((c) => c?.type === 'text' && typeof c.text === 'string')?.text;
-  return typeof text === 'string' && text.trim() ? text : undefined;
-}
 
 export const screenshotHandler: ActionHandler<'screenshot'> = {
   type: 'screenshot',
@@ -73,27 +67,9 @@ export const screenshotHandler: ActionHandler<'screenshot'> = {
       },
     });
 
-    if ((res as { isError?: boolean })?.isError) {
-      return failed('UNKNOWN', extractToolText(res) || 'Screenshot failed');
-    }
-
-    // Parse response
-    const text = extractToolText(res);
-    if (!text) {
-      return failed('UNKNOWN', 'Screenshot tool returned an empty response');
-    }
-
-    let payload: unknown;
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      return failed('UNKNOWN', 'Screenshot tool returned invalid JSON');
-    }
-
-    const base64Data = (payload as { base64Data?: unknown })?.base64Data;
-    if (typeof base64Data !== 'string' || base64Data.length === 0) {
-      return failed('UNKNOWN', 'Screenshot tool returned empty base64Data');
-    }
+    const screenshot = readScreenshotData(res);
+    if ('error' in screenshot) return failed('UNKNOWN', screenshot.error);
+    const base64Data = screenshot.data;
 
     // Store in variables if saveAs specified
     if (action.params.saveAs) {
