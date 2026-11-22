@@ -4,6 +4,7 @@ import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMcpBridgeSession, type McpBridgeSession } from './mcp-bridge-session';
 import type { NativeBridgeRequestClient } from './native-ipc-bridge-client';
+import { parseToolset, TOOLSET_ENV, type Toolset } from './toolset';
 
 interface BridgeCall {
   method: string;
@@ -40,6 +41,7 @@ afterEach(async () => {
 async function connect(
   bridge: FakeBridge,
   onToolListChanged?: (sourceSessionId: string) => Promise<void>,
+  toolset?: Toolset,
 ): Promise<{ client: Client; session: McpBridgeSession }> {
   const session = createMcpBridgeSession({
     bridgeClient: bridge,
@@ -48,6 +50,7 @@ async function connect(
     serverName: 'TestWebpageMcpServer',
     logLabel: 'test-webpage-mcp',
     onToolListChanged,
+    toolset,
   });
   const client = new Client(
     { name: 'test-client', version: '1.0.0' },
@@ -61,7 +64,44 @@ async function connect(
   return { client, session };
 }
 
+const tool = (name: string): Tool => ({ name, inputSchema: { type: 'object', properties: {} } });
+
 describe('MCP bridge session', () => {
+  it('lists and calls only the tools the toolset enables', async () => {
+    const bridge = new FakeBridge();
+    bridge.tools = [tool('chrome_read_page'), tool('chrome_console'), tool('workflow_run')];
+    const { client } = await connect(bridge, undefined, parseToolset('core'));
+
+    const listed = await client.listTools();
+    const refused = await client.callTool({ name: 'chrome_console', arguments: {} });
+
+    expect(listed.tools.map((t) => t.name)).toEqual(['chrome_read_page']);
+    expect(refused).toEqual({
+      content: [
+        {
+          type: 'text',
+          text: 'Error calling tool: chrome_console is not enabled (WEBPAGE_MCP_TOOLSET=core).',
+        },
+      ],
+      isError: true,
+    });
+    // The refused call never reached the native host.
+    expect(bridge.calls.map((call) => call.method)).toEqual(['mcp_list_tools']);
+  });
+
+  it('reads the toolset from WEBPAGE_MCP_TOOLSET by default', async () => {
+    vi.stubEnv(TOOLSET_ENV, 'all,-chrome_console');
+    try {
+      const bridge = new FakeBridge();
+      bridge.tools = [tool('chrome_read_page'), tool('chrome_console')];
+      const { client } = await connect(bridge);
+
+      expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['chrome_read_page']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('routes list and call requests through one isolated native bridge context', async () => {
     const bridge = new FakeBridge();
     bridge.tools = [

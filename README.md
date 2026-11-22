@@ -297,6 +297,35 @@ codex mcp add webpage-mcp -- npx -y -p webpage-mcp@latest webpage-mcp-stdio
 Claude Desktop uses the same `command` and `args` values in `claude_desktop_config.json`. This setup
 does not start an HTTP listener or open a TCP port.
 
+#### Choosing Which Tools Are Exposed
+
+Every listed tool's schema is sent to the model on each request. Set `WEBPAGE_MCP_TOOLSET` in the
+MCP client's `env` to expose fewer tools:
+
+```json
+{
+  "mcpServers": {
+    "webpage-mcp": {
+      "command": "npx",
+      "args": ["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"],
+      "env": { "WEBPAGE_MCP_TOOLSET": "core" }
+    }
+  }
+}
+```
+
+| Value           | Exposes                                                                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `all` (default) | Every tool                                                                                                                                                                                             |
+| `core`          | Everyday browsing: tabs, `chrome_navigate`, `chrome_read_page`, `chrome_get_web_content`, `chrome_screenshot`, `chrome_computer`, click / fill / keyboard, `chrome_handle_dialog`, `chrome_javascript` |
+| `browser`       | All browser tools, without the workflow / record-replay tools                                                                                                                                          |
+| `workflow`      | Workflow and record-replay tools, including `workflow_run`                                                                                                                                             |
+
+Combine entries with commas and add single tools by name (`core,chrome_console`); prefix an entry
+with `-` to remove it (`all,-workflow` or just `-chrome_gif_recorder`). Calls to tools outside the
+set are refused. The setting is read by `webpage-mcp-stdio` or `webpage-mcp-server`, the process
+your MCP client starts, not by the native host.
+
 ### Optional Streamable HTTP (Local or Remote)
 
 `webpage-mcp-server` exposes the same Chrome/native bridge through authenticated Streamable HTTP. It

@@ -249,6 +249,10 @@ node app/mcp-server/dist/mcp/mcp-server-http.js \
   - Comma/whitespace-separated HTTP Host and exact browser Origin allowlists.
 - `WEBPAGE_MCP_REMOTE_TLS_CERT` / `WEBPAGE_MCP_REMOTE_TLS_KEY`
   - Optional direct-listener PEM certificate and private key.
+- `WEBPAGE_MCP_TOOLSET`
+  - Tools exposed by `webpage-mcp-stdio` / `webpage-mcp-server` (default `all`). Profiles `core`,
+    `browser`, `workflow`, plus tool names, comma separated; `-name` removes (e.g. `core,chrome_console`
+    or `all,-workflow`). See "Choosing Which Tools Are Exposed" in the root README.
 
 ## Extension UI Token vs. Remote Authentication
 

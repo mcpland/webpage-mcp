@@ -17,6 +17,7 @@ import {
 } from './register-tools';
 import { shouldNotifyWorkflowToolListChanged } from './tool-list-change';
 import { resolveBridgeCallTimeoutMs } from './tool-timeouts';
+import { getEnvToolset, TOOLSET_ENV, type Toolset } from './toolset';
 
 const LIST_TOOLS_TIMEOUT_MS = 30_000;
 
@@ -27,6 +28,8 @@ export interface McpBridgeSessionOptions {
   serverName: string;
   logLabel: string;
   onToolListChanged?: (sourceSessionId: string) => Promise<void>;
+  /** Tools this session exposes; defaults to WEBPAGE_MCP_TOOLSET. */
+  toolset?: Toolset;
 }
 
 export interface McpBridgeSession {
@@ -72,6 +75,9 @@ export function createMcpBridgeSession(options: McpBridgeSessionOptions): McpBri
     clientCapabilities: resolveMcpClientCapabilities(server.getClientCapabilities()),
   });
 
+  const toolset = options.toolset ?? getEnvToolset();
+  const enabledTools = (tools: Tool[]): Tool[] => tools.filter((tool) => toolset.allows(tool.name));
+
   server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
     try {
       const response = await options.bridgeClient.request<{ tools?: Tool[] }>(
@@ -80,18 +86,33 @@ export function createMcpBridgeSession(options: McpBridgeSessionOptions): McpBri
         LIST_TOOLS_TIMEOUT_MS,
         extra.signal,
       );
-      return { tools: response && Array.isArray(response.tools) ? response.tools : TOOL_SCHEMAS };
+      return {
+        tools: enabledTools(
+          response && Array.isArray(response.tools) ? response.tools : TOOL_SCHEMAS,
+        ),
+      };
     } catch (error) {
       if (isAbortFailure(error, extra.signal)) {
         throw error;
       }
       console.warn(`[${options.logLabel}] Failed to list tools via native bridge:`, error);
-      return { tools: TOOL_SCHEMAS };
+      return { tools: enabledTools(TOOL_SCHEMAS) };
     }
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const args = request.params.arguments || {};
+    if (!toolset.allows(request.params.name)) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error calling tool: ${request.params.name} is not enabled (${TOOLSET_ENV}=${toolset.spec}).`,
+          },
+        ],
+        isError: true,
+      };
+    }
     try {
       const response = await options.bridgeClient.request<{ result?: CallToolResult }>(
         'mcp_call_tool',
