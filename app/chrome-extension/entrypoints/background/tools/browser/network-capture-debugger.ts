@@ -1,4 +1,4 @@
-import { PendingInheritedCaptures } from './network-capture-inheritance';
+import { getCaptureTab, PendingInheritedCaptures } from './network-capture-inheritance';
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
@@ -152,8 +152,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       console.log(
         `NetworkDebuggerStartTool: New tab ${newTabId} created from capturing tab ${openerTabId}, will extend capture to it.`,
       );
-      await this.pendingInheritedTabs.run(newTabId, openerCaptureInfo.rootTabId, async (signal) => {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+      await this.pendingInheritedTabs.run(newTabId, openerTabId, openerCaptureInfo.rootTabId, async (signal) => {
         if (signal.aborted || this.captureData.get(openerTabId) !== openerCaptureInfo) {
           return;
         }
@@ -223,7 +222,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
 
     try {
       // Get tab information
-      const tab = await chrome.tabs.get(tabId);
+      const tab = await getCaptureTab(tabId, options.signal);
       options.signal?.throwIfAborted();
       this.completedCaptures.delete(tabId);
 
@@ -923,6 +922,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     // Clear active state synchronously before awaiting CDP commands so
     // concurrent stop calls coalesce and no timers fire after stop begins.
     this.cleanupCapture(tabId);
+    const childrenStopped = this.pendingInheritedTabs.cancel(tabId);
 
     let explicitStopJoined = !isAutoStop;
     const stopPromise = (async () => {
@@ -1024,7 +1024,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
         this.cacheCompletedCapture(tabId, result, captureInfo.rootTabId);
       }
       return result;
-    })();
+    })().finally(() => childrenStopped);
 
     const entry = {
       promise: stopPromise,
@@ -1312,14 +1312,8 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
 
     if (args.all === true) {
       const tabIds = [...ongoingCaptures];
-      let primaryResult: ToolResult | null = null;
-      for (const tabId of tabIds) {
-        const result = await this.performStop(startTool, tabId);
-        if (!primaryResult) {
-          primaryResult = result;
-        }
-      }
-      return primaryResult || createErrorResponse('No active network captures found in any tab.');
+      const [primaryResult] = await Promise.all(tabIds.map((tabId) => this.performStop(startTool, tabId)));
+      return primaryResult;
     }
 
     if (typeof args.tabId === 'number') {

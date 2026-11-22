@@ -249,6 +249,29 @@ describe('network capture backend boundaries', () => {
     }
   });
 
+  it.each([
+    ['debugger', false], ['debugger', true], ['webRequest', false], ['webRequest', true],
+  ] as const)('manual stop in %s mode (all=%s) drains pending starts before another capture', async (mode, all) => {
+    const { networkCaptureTool } = await import('@/entrypoints/background/tools/browser/network-capture');
+    const { networkDebuggerStartTool } = await import('@/entrypoints/background/tools/browser/network-capture-debugger');
+    const { networkCaptureStartTool } = await import('@/entrypoints/background/tools/browser/network-capture-web-request');
+    const owner = mode === 'debugger' ? networkDebuggerStartTool : networkCaptureStartTool;
+    await (owner as any).startCaptureForTab(7, {
+      maxCaptureTime: 30_000, inactivityTimeout: 10_000, includeStatic: true,
+    });
+    const child = (owner as any).handleTabCreated({ id: 8, openerTabId: 7 });
+    try {
+      const stopped = await networkCaptureTool.execute({ action: 'stop', tabId: 7, all });
+      expect(stopped.isError).toBe(false);
+      expect(owner.hasAvailableCapture()).toBe(false);
+      const next = await networkCaptureTool.execute({ action: 'start', tabId: 7, needResponseBody: false });
+      expect(next.isError).toBe(false);
+    } finally {
+      await child;
+      await networkCaptureTool.execute({ action: 'stop', all: true });
+    }
+  });
+
   it('stops inherited child captures when stopLineageCaptures is called', async () => {
     const { networkCaptureStartTool } = await import(
       '@/entrypoints/background/tools/browser/network-capture-web-request'
