@@ -1143,6 +1143,54 @@ describe('navigateTool', () => {
     }
   });
 
+  it.each(['back', 'forward'] as const)('observes trusted %s traversal in the original opaque document', async (direction) => {
+    vi.useFakeTimers();
+    const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockRejectedValue(new Error('Debugger in use'));
+    const event = { addListener: vi.fn(), removeListener: vi.fn() };
+    const addEventListener = vi.fn();
+    const frame = { top: {}, navigation: { currentEntry: null }, addEventListener };
+    const replacement = { top: {}, navigation: { currentEntry: null }, addEventListener: vi.fn() };
+    let documentId = 'original';
+    let trustedTraversal = false;
+    const executeScript = vi.fn(async ({ func, args }) => {
+      const previous = window;
+      vi.stubGlobal('window', documentId === 'original' ? frame : replacement);
+      try {
+        return [{ frameId: 9, documentId, result: func(...args) }];
+      } finally {
+        vi.stubGlobal('window', previous);
+      }
+    });
+    Object.assign(chrome, {
+      scripting: { executeScript },
+      webNavigation: { onHistoryStateUpdated: event, getAllFrames: async () => [{ frameId: 9 }] },
+    });
+    const traversal = direction === 'back' ? mocks.tabsGoBack : mocks.tabsGoForward;
+    traversal.mockImplementation(async () => {
+      const notify = () => event.addListener.mock.calls[0][0]({
+        tabId: makeTab().id, frameId: 9, documentId, transitionType: 'auto_subframe',
+      });
+      const popstate = addEventListener.mock.calls[0][1];
+      popstate({ isTrusted: false });
+      notify();
+      setTimeout(() => { documentId = 'replacement'; notify(); }, 200);
+      setTimeout(() => { replacement.addEventListener.mock.calls[0][1]({ isTrusted: true }); notify(); }, 300);
+      setTimeout(() => { documentId = 'original'; trustedTraversal = true; popstate({ isTrusted: true }); notify(); }, 400);
+    });
+    try {
+      const pending = navigateTool.execute({ url: direction, waitUntil: 'commit' }).then(result => {
+        expect(trustedTraversal).toBe(true);
+        expect(result.isError).toBe(false);
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      await pending;
+      expect(addEventListener).toHaveBeenCalledTimes(1);
+    } finally {
+      history.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it.each(['back', 'forward'] as const)('continues top-level %s when a paused frame never answers', async (direction) => {
     const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockRejectedValue(new Error('Debugger in use'));
     const executeScript = vi.fn(() => new Promise(() => {}));

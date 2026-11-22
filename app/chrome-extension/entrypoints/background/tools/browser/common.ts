@@ -35,21 +35,31 @@ function readTabHistory(tabId: number, signal: AbortSignal): Promise<TabHistory 
 
 type FrameHistoryRead = 'back' | 'forward' | 'current';
 
-async function readFrameHistoryKeys(tabId: number, direction: FrameHistoryRead, signal: AbortSignal) {
+async function readFrameHistory(tabId: number, direction: FrameHistoryRead, signal: AbortSignal) {
   // Navigation API keys are scoped to a frame and survive same-document traversal.
   // An isolated world can read them while another client owns the debugger.
   const readSignal = AbortSignal.any([signal, AbortSignal.timeout(FRAME_HISTORY_READ_TIMEOUT_MS)]);
   return readWithSignal(() => chrome.scripting.executeScript({
     target: { tabId, allFrames: true }, world: 'ISOLATED', injectImmediately: true,
     args: [direction],
-    func: (direction: FrameHistoryRead) => {
+    func: (direction: FrameHistoryRead): string[] | number => {
       if (window === window.top) return [];
       const nav = (window as Window & { navigation?: {
         currentEntry: NavigationHistoryEntry | null;
         entries(): NavigationHistoryEntry[];
       } }).navigation;
       const current = nav?.currentEntry;
-      if (!nav || !current) return [];
+      if (!nav || !current) {
+        // Opaque frames have no Navigation API entries. One listener per document
+        // observes browser popstate without reading the page's history state.
+        const scope = window as Window & { __webpageMcpPopstate?: { count: number } };
+        if (!scope.__webpageMcpPopstate) {
+          const observed = { count: 0 };
+          window.addEventListener('popstate', (event) => { if (event.isTrusted) observed.count++; });
+          scope.__webpageMcpPopstate = observed;
+        }
+        return scope.__webpageMcpPopstate.count;
+      }
       if (direction === 'current') return [current.key];
       return nav.entries().filter((entry) => direction === 'back'
         ? entry.index < current.index : entry.index > current.index).map((entry) => entry.key);
@@ -276,16 +286,20 @@ class NavigateTool extends BaseBrowserToolExecutor {
     // baselines before traversal so frame-local keys remain usable after a handoff.
     const [before, frameEntries] = hasChildren ? await Promise.all([
       readTabHistory(tabId, signal),
-      readFrameHistoryKeys(tabId, direction, signal),
+      readFrameHistory(tabId, direction, signal),
     ]) : [undefined, []] as const;
     const frameDestinations = new Map<number, Set<string>>();
-    for (const { frameId, result } of frameEntries) {
-      if (result?.length) frameDestinations.set(frameId, new Set(result));
+    const opaqueTraversals = new Map<string, number>();
+    for (const { frameId, documentId, result } of frameEntries) {
+      if (typeof result === 'number') {
+        if (documentId) opaqueTraversals.set(documentId, result);
+      } else if (result?.length) frameDestinations.set(frameId, new Set(result));
     }
     const destinations = before && new Set((direction === 'back'
       ? before.entries.slice(0, before.currentIndex)
       : before.entries.slice(before.currentIndex + 1)).map((entry) => entry.id));
     let committedUrl: string | undefined;
+    const traversingOpaqueDocuments = new Set<string>();
     let childUpdated = false;
     let childTraversed = false;
     const onCommit = (details: chrome.webNavigation.WebNavigationTransitionCallbackDetails) => {
@@ -293,6 +307,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
       if (details.frameId === 0) committedUrl = details.url;
       else {
         childUpdated = true;
+        if (details.transitionType === 'auto_subframe' && details.documentId && opaqueTraversals.has(details.documentId)) {
+          traversingOpaqueDocuments.add(details.documentId);
+        }
         if (details.transitionQualifiers?.includes('forward_back')) childTraversed = true;
       }
     };
@@ -309,15 +326,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
         // Chrome can report a child traversing pushState entries without a forward_back
         // qualifier. Confirm it reached an existing joint session-history entry.
         const topTraversed = current.url && (current.url !== previousUrl || current.url === committedUrl);
-        if (!topTraversed && childUpdated && !childTraversed) {
+        if (!topTraversed && (childUpdated || traversingOpaqueDocuments.size) && !childTraversed) {
+          const history = childUpdated && destinations?.size ? await readTabHistory(tabId, signal) : undefined;
           childUpdated = false;
-          const history = destinations?.size ? await readTabHistory(tabId, signal) : undefined;
           if (history && destinations) {
             const entry = history.entries[history.currentIndex];
             childTraversed = entry !== undefined && destinations.has(entry.id);
-          } else if (frameDestinations.size) {
-            const currentEntries = await readFrameHistoryKeys(tabId, 'current', signal);
-            childTraversed = currentEntries.some(({ frameId, result }) => {
+          } else if (frameDestinations.size || traversingOpaqueDocuments.size) {
+            const currentEntries = await readFrameHistory(tabId, 'current', signal);
+            childTraversed = currentEntries.some(({ frameId, documentId, result }) => {
+              if (typeof result === 'number') {
+                const before = opaqueTraversals.get(documentId);
+                return traversingOpaqueDocuments.has(documentId) && before !== undefined && result > before;
+              }
               const key = result?.[0];
               return key !== undefined && frameDestinations.get(frameId)?.has(key);
             });
