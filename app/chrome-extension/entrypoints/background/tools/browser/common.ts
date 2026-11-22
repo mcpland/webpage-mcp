@@ -225,7 +225,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
     const events = [navigation?.onCommitted, navigation?.onHistoryStateUpdated, navigation?.onReferenceFragmentUpdated];
     for (const event of events) event?.addListener(onCommit);
     try {
-      const startedAt = Date.now();
+      const deadline = Date.now() + (waitUntil === 'load' ? NAVIGATION_LOAD_TIMEOUT_MS : NAVIGATION_WAIT_TIMEOUT_MS);
       if (direction === 'back') await chrome.tabs.goBack(tabId);
       else await chrome.tabs.goForward(tabId);
 
@@ -233,9 +233,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const current = await chrome.tabs.get(tabId);
         if (current.url && (current.url !== previousUrl || current.url === committedUrl)) {
           if (waitUntil === 'commit' || current.status === 'complete') return current;
-          return this.waitForLoadComplete(tabId, startedAt + NAVIGATION_LOAD_TIMEOUT_MS);
+          return this.waitForLoadComplete(tabId, deadline);
         }
-        if (Date.now() - startedAt >= NAVIGATION_WAIT_TIMEOUT_MS) {
+        if (Date.now() >= deadline) {
           throw new Error('Timed out waiting for history navigation to commit');
         }
         await this.sleep(NAVIGATION_POLL_MS);

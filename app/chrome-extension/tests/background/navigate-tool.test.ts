@@ -995,6 +995,28 @@ describe('navigateTool', () => {
     }
   });
 
+  it('uses the full load budget when a history destination takes over eight seconds to commit', async () => {
+    vi.useFakeTimers();
+    try {
+      const start = Date.now();
+      const origin = 'https://example.com/current';
+      const destination = 'https://example.com/slow';
+      mocks.tabsQuery.mockResolvedValue([makeTab({ url: origin })]);
+      mocks.tabsGet.mockImplementation(async () => {
+        const elapsed = Date.now() - start;
+        return makeTab({
+          url: elapsed < 9600 ? origin : destination,
+          status: elapsed < 10000 ? 'loading' : 'complete',
+        });
+      });
+      const pending = navigateTool.execute({ url: 'back' });
+      await vi.advanceTimersByTimeAsync(10100);
+      expect(getTextPayload(await pending)).toMatchObject({ url: destination, status: 'complete' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reports an error when history never commits', async () => {
     vi.useFakeTimers();
     try {
