@@ -125,6 +125,24 @@ describe('keyboard-helper page protocol', () => {
     expect(atA).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the caret of an already focused open-shadow input without refocusing it', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = host.attachShadow({ mode: 'open' });
+    const field = document.createElement('input');
+    root.append(field);
+    field.value = 'abc';
+    field.focus();
+    field.setSelectionRange(1, 1);
+    const focus = vi.spyOn(field, 'focus');
+    const result = await sendKeys(executeHelper(), 'Escape');
+    expect(result.success).toBe(true);
+    expect(document.activeElement).toBe(host);
+    expect(root.activeElement).toBe(field);
+    expect(focus).not.toHaveBeenCalled();
+    expect(field.selectionStart).toBe(1);
+  });
+
   it('moves the browser caret before deleting and supports extending the selection', async () => {
     const field = document.createElement('input');
     document.body.append(field);

@@ -336,8 +336,9 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
    */
   async function simulateKeyboard(keysSequenceString, targetElement = null, delay = 0, steps, deadline) {
     try {
-      const element = targetElement || focusedElement();
-      if (element !== document.activeElement && typeof element.focus === 'function') {
+      const active = focusedElement();
+      const element = targetElement || active;
+      if (element !== active && typeof element.focus === 'function') {
         element.focus();
         await new Promise((resolve) => setTimeout(resolve, 50)); // Small delay for focus
       }
