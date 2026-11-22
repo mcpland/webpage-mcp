@@ -156,7 +156,7 @@ export const dragHandler: ActionHandler<'drag'> = {
     }
 
     // Ensure element refs are fresh before locating
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
 
     // Get path coordinates as fallback
     const pathEndpoints = getPathEndpoints(action.params.path);

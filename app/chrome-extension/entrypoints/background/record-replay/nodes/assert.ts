@@ -51,7 +51,7 @@ export const assertNode: NodeRuntime<StepAssert> = {
     } else if ("exists" in s.assert || "visible" in s.assert) {
       const selector = (s.assert as any).exists || (s.assert as any).visible;
       const tabId = await resolveNodeTabId(ctx);
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
       const ensured: any = (await chrome.tabs.sendMessage(
         tabId,
         {
@@ -70,7 +70,7 @@ export const assertNode: NodeRuntime<StepAssert> = {
       const { selector, name, equals, matches } =
         (s.assert as any).attribute || {};
       const tabId = await resolveNodeTabId(ctx);
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
       const resp: any = (await chrome.tabs.sendMessage(
         tabId,
         { action: "getAttributeForSelector", selector, name } as any,

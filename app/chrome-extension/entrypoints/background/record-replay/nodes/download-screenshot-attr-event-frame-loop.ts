@@ -61,7 +61,7 @@ export const triggerEventNode: NodeRuntime<any> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const tabId = await resolveNodeTabId(ctx);
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const cssSelector = !(located as any)?.ref
       ? s.target.candidates?.find((c: any) => c.type === 'css' || c.type === 'attr')?.value
@@ -114,7 +114,7 @@ export const setAttributeNode: NodeRuntime<any> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const tabId = await resolveNodeTabId(ctx);
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const frameId = (located as any)?.frameId ?? ctx.frameId;
     const cssSelector = !(located as any)?.ref
@@ -177,7 +177,7 @@ export const switchFrameNode: NodeRuntime<any> = {
     if (!target) ctx.frameId = undefined;
     else ctx.frameId = target.frameId;
     try {
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
     } catch {}
     ctx.logger({
       stepId: (step as any).id,

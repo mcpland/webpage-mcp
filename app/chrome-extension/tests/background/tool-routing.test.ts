@@ -470,6 +470,7 @@ describe('handleCallTool navigation routing', () => {
   });
 
   it.each([
+    ['record_replay_flow_run', 'flowRunExecute'],
     ['chrome_handle_dialog', 'dialogExecute'],
     ['chrome_handle_download', 'downloadExecute'],
   ] as const)('runs %s outside the per-tab queue', async (name, executeKey) => {

@@ -13,7 +13,7 @@ export const clickNode: NodeRuntime<any> = {
   },
   run: async (ctx: ExecCtx, step: Step) => {
     const tabId = await resolveNodeTabId(ctx);
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const frameId = (located as any)?.frameId ?? ctx.frameId;
@@ -60,7 +60,7 @@ export const dblclickNode: NodeRuntime<any> = {
   validate: clickNode.validate,
   run: async (ctx: ExecCtx, step: Step) => {
     const tabId = await resolveNodeTabId(ctx);
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const frameId = (located as any)?.frameId ?? ctx.frameId;

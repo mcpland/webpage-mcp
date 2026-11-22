@@ -79,7 +79,7 @@ describe('fillNode file uploads', () => {
     expect(result).toEqual({});
     expect(mocks.handleCallTool).toHaveBeenCalledWith({
       name: TOOL_NAMES.BROWSER.READ_PAGE,
-      args: { tabId: 7 },
+      args: { tabId: 7, frameId: 0 },
     });
     expect(mocks.uploadLocalFileToInputInternal).toHaveBeenCalledWith({
       selector: '#upload',

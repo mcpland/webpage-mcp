@@ -16,6 +16,7 @@ vi.mock('@/shared/selector', async (importOriginal) => {
   };
 });
 
+import { handleCallTool } from '@/entrypoints/background/tools';
 import { clickHandler, dblclickHandler } from '@/entrypoints/background/record-replay/actions/handlers/click';
 import { dragHandler } from '@/entrypoints/background/record-replay/actions/handlers/drag';
 import { fillHandler } from '@/entrypoints/background/record-replay/actions/handlers/fill';
@@ -27,6 +28,14 @@ import {
 } from '@/entrypoints/background/record-replay/actions/handlers/dom';
 
 describe('action handler target validation', () => {
+  it('initializes the selected child frame before locating a workflow attribute target', async () => {
+    await setAttributeHandler.run(
+      { tabId: 7, frameId: 4, vars: {} } as never,
+      { id: 'set', type: 'setAttribute', params: { target: { candidates: [{ type: 'css', selector: '#field' }] }, name: 'data-ready', value: 'yes' } },
+    );
+    expect(handleCallTool).toHaveBeenCalledWith({ name: 'chrome_read_page', args: { tabId: 7, frameId: 4 } });
+  });
+
   it('accepts selector-only element targets', () => {
     const target = { selector: '#submit' };
     const cases = [

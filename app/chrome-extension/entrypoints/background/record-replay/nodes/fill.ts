@@ -15,7 +15,7 @@ export const fillNode: NodeRuntime<StepFill> = {
   run: async (ctx: ExecCtx, step: StepFill) => {
     const s: any = step;
     const tabId = await resolveNodeTabId(ctx);
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const frameId = (located as any)?.frameId ?? ctx.frameId;
     const first = s.target?.candidates?.[0]?.type;

@@ -87,7 +87,7 @@ export const keyHandler: ActionHandler<'key'> = {
     // Handle optional target focusing
     const target = action.params.target as ElementTarget | undefined;
     if (target) {
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
 
       const {
         selectorTarget,

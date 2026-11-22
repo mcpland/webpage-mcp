@@ -139,7 +139,7 @@ export const scrollHandler: ActionHandler<'scroll'> = {
       return failed('VALIDATION_ERROR', `Scroll mode "${mode}" requires a target`);
     }
 
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
 
     const { selectorTarget, firstCandidateType, firstCssOrAttr } = toSelectorTarget(target, vars);
     const located = await selectorLocator.locate(tabId, selectorTarget, {

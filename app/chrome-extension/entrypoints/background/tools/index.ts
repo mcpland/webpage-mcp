@@ -96,6 +96,8 @@ const BACKGROUND_DEFAULT_SUPPORTED_TOOLS = new Set<string>([
 // may be blocked on (a JavaScript dialog opened by a click, a download started
 // by a click). Queuing them behind that interaction would deadlock the tab.
 const TAB_QUEUE_EXEMPT_TOOLS = new Set<string>([
+  // A flow waits for its own frame reads and other queued tool calls.
+  TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
   TOOL_NAMES.BROWSER.HANDLE_DIALOG,
   TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD,
 ]);
