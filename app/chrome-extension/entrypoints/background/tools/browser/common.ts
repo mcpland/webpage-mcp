@@ -628,6 +628,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
         // Respect background flag for focus behavior
         await this.ensureFocus(targetTab, {
+          signal,
           activate: background !== true,
           focusWindow: background !== true,
         });

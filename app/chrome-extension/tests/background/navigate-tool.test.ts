@@ -1037,6 +1037,19 @@ describe('navigateTool', () => {
     }
   });
 
+  it.each(['tab lookup', 'window focus'])('does not activate a history target after cancellation during %s', async (stage) => {
+    const controller = new AbortController();
+    const tab = makeTab({ active: false });
+    const cancel = async () => { controller.abort(); return tab; };
+    if (stage === 'tab lookup') mocks.tabsGet.mockImplementationOnce(cancel);
+    else mocks.windowsUpdate.mockImplementationOnce(cancel);
+    const result = await navigateTool.execute({ url: 'back', tabId: tab.id }, { signal: controller.signal });
+    expect(result.isError).toBe(true);
+    expect(mocks.windowsUpdate).toHaveBeenCalledTimes(stage === 'tab lookup' ? 0 : 1);
+    expect(mocks.tabsUpdate).not.toHaveBeenCalled();
+    expect(mocks.tabsGoBack).not.toHaveBeenCalled();
+  });
+
   it.each(['back', 'forward'] as const)('does not issue %s after cancellation during history preflight', async (url) => {
     Object.assign(chrome, { webNavigation: {
       getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0 }, { frameId: 9 }]),

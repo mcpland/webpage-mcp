@@ -263,13 +263,15 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
    */
   protected async ensureFocus(
     tab: chrome.tabs.Tab,
-    options: { activate?: boolean; focusWindow?: boolean } = {},
+    options: { activate?: boolean; focusWindow?: boolean; signal?: AbortSignal } = {},
   ): Promise<void> {
     const activate = options.activate === true;
     const focusWindow = options.focusWindow === true;
+    options.signal?.throwIfAborted();
     if (focusWindow && typeof tab.windowId === 'number') {
       await chrome.windows.update(tab.windowId, { focused: true });
     }
+    options.signal?.throwIfAborted();
     if (activate && typeof tab.id === 'number') {
       await chrome.tabs.update(tab.id, { active: true });
     }
