@@ -63,10 +63,10 @@ export class PendingInheritedCaptures {
     }
   }
 
-  async cancel(stoppedTabId: number): Promise<void> {
+  async cancel(tabId: number, match: 'openerTabId' | 'rootTabId'): Promise<void> {
     const cleanup: Promise<void>[] = [];
     for (const start of this.starts.values()) {
-      if (start.rootTabId !== stoppedTabId && start.openerTabId !== stoppedTabId) continue;
+      if (start[match] !== tabId) continue;
       start.controller.abort();
       cleanup.push(start.done);
     }

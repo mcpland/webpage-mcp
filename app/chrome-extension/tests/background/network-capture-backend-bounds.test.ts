@@ -295,6 +295,29 @@ describe('network capture backend boundaries', () => {
     }
   });
 
+  it.each(['webRequest', 'debugger'])('preserves pending grandchildren of a still-active opener in %s', async (mode) => {
+    const backend = mode === 'debugger'
+      ? (await import('@/entrypoints/background/tools/browser/network-capture-debugger')).networkDebuggerStartTool
+      : (await import('@/entrypoints/background/tools/browser/network-capture-web-request')).networkCaptureStartTool;
+    vi.mocked(chrome.tabs.get).mockImplementation(async (id) => tab(id));
+    await (backend as any).startCaptureForTab(7, {
+      maxCaptureTime: 30_000, inactivityTimeout: 10_000, includeStatic: true,
+    });
+    await (backend as any).handleTabCreated({ id: 8, openerTabId: 7 });
+    const pending = (backend as any).handleTabCreated({ id: 9, openerTabId: 8 });
+    try {
+      await backend.stopCapture(7);
+      await pending;
+      expect(backend.getAvailableTabIds().sort()).toEqual([8, 9]);
+      const sibling = (backend as any).handleTabCreated({ id: 10, openerTabId: 8 });
+      await backend.stopLineageCaptures(7);
+      await sibling;
+      expect(backend.hasAvailableCapture()).toBe(false);
+    } finally {
+      await backend.stopLineageCaptures(7);
+    }
+  });
+
   it('stops inherited child captures when stopLineageCaptures is called', async () => {
     const { networkCaptureStartTool } = await import(
       '@/entrypoints/background/tools/browser/network-capture-web-request'

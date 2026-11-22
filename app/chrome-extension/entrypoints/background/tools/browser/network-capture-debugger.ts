@@ -878,7 +878,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
 
   public async stopLineageCaptures(rootTabId: number): Promise<void> {
     this.pruneCompletedCaptures();
-    const cleanup: Promise<unknown>[] = [this.pendingInheritedTabs.cancel(rootTabId)];
+    const cleanup: Promise<unknown>[] = [this.pendingInheritedTabs.cancel(rootTabId, 'rootTabId')];
     const children = new Set<number>();
     for (const captures of [this.captureData, this.stoppingCaptures]) {
       for (const [tabId, capture] of captures) {
@@ -926,7 +926,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     // Clear active state synchronously before awaiting CDP commands so
     // concurrent stop calls coalesce and no timers fire after stop begins.
     this.cleanupCapture(tabId);
-    const childrenStopped = this.pendingInheritedTabs.cancel(tabId);
+    const childrenStopped = this.pendingInheritedTabs.cancel(tabId, 'openerTabId');
 
     let explicitStopJoined = !isAutoStop;
     const stopPromise = (async () => {

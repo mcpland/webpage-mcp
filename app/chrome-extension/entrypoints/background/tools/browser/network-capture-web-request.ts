@@ -459,7 +459,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
 
   public async stopLineageCaptures(rootTabId: number): Promise<void> {
     this.pruneCompletedCaptures();
-    const cleanup: Promise<unknown>[] = [this.pendingInheritedTabs.cancel(rootTabId)];
+    const cleanup: Promise<unknown>[] = [this.pendingInheritedTabs.cancel(rootTabId, 'rootTabId')];
     const children = new Set<number>();
     for (const captures of [this.captureData, this.stoppingCaptures]) {
       for (const [tabId, capture] of captures) {
@@ -887,7 +887,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
 
     const totalRequestsReceived = this.requestCounters.get(tabId) || 0;
     this.cleanupCapture(tabId);
-    const childrenStopped = this.pendingInheritedTabs.cancel(tabId);
+    const childrenStopped = this.pendingInheritedTabs.cancel(tabId, 'openerTabId');
 
     let explicitStopJoined = !isAutoStop;
     const stopPromise = (async () => {
