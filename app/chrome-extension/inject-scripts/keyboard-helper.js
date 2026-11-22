@@ -1,5 +1,13 @@
 // keyboard-helper.js
 // This script is injected into the page to handle keyboard event simulation
+//
+// It is the fallback for when CDP input is unavailable (the debugger cannot
+// attach). Synthetic key events have no default actions, so the browser
+// defaults agents depend on are reproduced here: text editing through
+// beforeinput + execCommand, caret keys, Tab focus order, Enter/Space
+// activation and implicit form submission. Keep it to that list: for any
+// other case, fail with an explicit error instead of emulating more browser
+// behaviour; the CDP path is the one that has to be faithful.
 
 if (window.__KEYBOARD_HELPER_INITIALIZED__) {
   // Already initialized, skip
