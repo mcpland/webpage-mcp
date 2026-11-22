@@ -209,32 +209,48 @@ class NavigateTool extends BaseBrowserToolExecutor {
     return current;
   }
 
-  /**
-   * Settle a reload or history navigation: wait for it to start (status
-   * "loading" or a URL change), then for it to finish loading.
-   */
+  private async navigateHistory(
+    tabId: number,
+    previousUrl: string,
+    direction: 'back' | 'forward',
+    waitUntil: NavigationWaitUntil,
+  ): Promise<chrome.tabs.Tab> {
+    // Entries may share a URL, including pushState and full-document navigations.
+    // Arm before calling goBack/goForward so a cached or same-document commit is observable.
+    let committedUrl: string | undefined;
+    const onCommit = (details: { tabId: number; frameId: number; url: string }) => {
+      if (details.tabId === tabId && details.frameId === 0) committedUrl = details.url;
+    };
+    const navigation = chrome.webNavigation;
+    const events = [navigation?.onCommitted, navigation?.onHistoryStateUpdated, navigation?.onReferenceFragmentUpdated];
+    for (const event of events) event?.addListener(onCommit);
+    try {
+      const startedAt = Date.now();
+      if (direction === 'back') await chrome.tabs.goBack(tabId);
+      else await chrome.tabs.goForward(tabId);
+
+      for (;;) {
+        const current = await chrome.tabs.get(tabId);
+        if (current.url && (current.url !== previousUrl || current.url === committedUrl)) {
+          if (waitUntil === 'commit' || current.status === 'complete') return current;
+          return this.waitForLoadComplete(tabId, startedAt + NAVIGATION_LOAD_TIMEOUT_MS);
+        }
+        if (Date.now() - startedAt >= NAVIGATION_WAIT_TIMEOUT_MS) {
+          throw new Error('Timed out waiting for history navigation to commit');
+        }
+        await this.sleep(NAVIGATION_POLL_MS);
+      }
+    } finally {
+      for (const event of events) event?.removeListener(onCommit);
+    }
+  }
+
   private async waitForNavigationToSettle(
     tabId: number,
     previousUrl: string,
     waitUntil: NavigationWaitUntil,
-    options: { expectUrlChange?: boolean } = {},
   ): Promise<chrome.tabs.Tab> {
-    if (waitUntil === 'commit') {
-      if (!options.expectUrlChange) return chrome.tabs.get(tabId);
-      // History back/forward updates the tab URL asynchronously; wait briefly
-      // for the new URL to commit so scheme checks and snapshots see the destination.
-      const commitDeadline = Date.now() + NAVIGATION_START_GRACE_MS;
-      for (;;) {
-        const current = await chrome.tabs.get(tabId);
-        if (
-          (current.url || '') !== previousUrl ||
-          Date.now() >= commitDeadline
-        ) {
-          return current;
-        }
-        await this.sleep(NAVIGATION_POLL_MS);
-      }
-    }
+    if (waitUntil === 'commit') return chrome.tabs.get(tabId);
     const startedAt = Date.now();
     let started = false;
     for (;;) {
@@ -524,20 +540,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         });
 
         const urlBeforeHistory = String(targetTab.url || '');
-        if (url === 'forward') {
-          await chrome.tabs.goForward(targetTab.id);
-          console.log(`Navigated forward in tab ID: ${targetTab.id}`);
-        } else {
-          await chrome.tabs.goBack(targetTab.id);
-          console.log(`Navigated back in tab ID: ${targetTab.id}`);
-        }
-
-        const updatedTab = await this.waitForNavigationToSettle(
-          targetTab.id,
-          urlBeforeHistory,
-          waitUntil,
-          { expectUrlChange: true },
-        );
+        const updatedTab = await this.navigateHistory(targetTab.id, urlBeforeHistory, url, waitUntil);
         if (hasDisallowedPublicUrlScheme(String(updatedTab.url || ''))) {
           return createErrorResponse(getNavigateTargetPageError('history'));
         }

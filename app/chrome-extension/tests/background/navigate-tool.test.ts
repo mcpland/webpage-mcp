@@ -977,6 +977,48 @@ describe('navigateTool', () => {
     expect(payload).toMatchObject({ url: 'https://example.com/same', status: 'complete' });
   });
 
+  it('keeps waiting for a history destination after the one-second startup grace', async () => {
+    vi.useFakeTimers();
+    try {
+      const start = Date.now();
+      const origin = 'https://example.com/current';
+      const destination = 'https://example.com/previous';
+      mocks.tabsQuery.mockResolvedValue([makeTab({ url: origin })]);
+      mocks.tabsGet.mockImplementation(async () => makeTab({
+        url: Date.now() - start < 2000 ? origin : destination,
+      }));
+      const pending = navigateTool.execute({ url: 'back', waitUntil: 'commit' });
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(getTextPayload(await pending).url).toBe(destination);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports an error when history never commits', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = navigateTool.execute({ url: 'back', waitUntil: 'commit' });
+      await vi.advanceTimersByTimeAsync(8500);
+      expect((await pending).isError).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recognizes a same-URL history entry and removes the commit listener', async () => {
+    const event = { addListener: vi.fn(), removeListener: vi.fn() };
+    Object.assign(chrome, { webNavigation: { onHistoryStateUpdated: event } });
+    const tab = makeTab();
+    mocks.tabsQuery.mockResolvedValue([tab]);
+    mocks.tabsGoBack.mockImplementation(async () => {
+      event.addListener.mock.calls[0][0]({ tabId: tab.id, frameId: 0, url: tab.url });
+    });
+    const result = await navigateTool.execute({ url: 'back', waitUntil: 'commit' });
+    expect(getTextPayload(result).url).toBe(tab.url);
+    expect(event.removeListener).toHaveBeenCalledWith(event.addListener.mock.calls[0][0]);
+  });
+
   it('waits for history goBack URL change even when waitUntil is commit', async () => {
     let polls = 0;
     mocks.tabsQuery.mockResolvedValueOnce([
