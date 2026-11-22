@@ -1,3 +1,4 @@
+import { readWithSignal } from '@/utils/read-with-signal';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
@@ -27,6 +28,29 @@ interface TabHistory {
 function readTabHistory(tabId: number, signal: AbortSignal): Promise<TabHistory | undefined> {
   return cdpSessionManager.sendCommand<TabHistory>(tabId, 'Page.getNavigationHistory', undefined, signal)
     .catch(() => undefined);
+}
+
+type FrameHistoryRead = 'back' | 'forward' | 'current';
+
+async function readFrameHistoryKeys(tabId: number, direction: FrameHistoryRead, signal: AbortSignal) {
+  // Navigation API keys are scoped to a frame and survive same-document traversal.
+  // An isolated world can read them while another client owns the debugger.
+  return readWithSignal(() => chrome.scripting.executeScript({
+    target: { tabId, allFrames: true }, world: 'ISOLATED', injectImmediately: true,
+    args: [direction],
+    func: (direction: FrameHistoryRead) => {
+      if (window === window.top) return [];
+      const nav = (window as Window & { navigation?: {
+        currentEntry: NavigationHistoryEntry | null;
+        entries(): NavigationHistoryEntry[];
+      } }).navigation;
+      const current = nav?.currentEntry;
+      if (!nav || !current) return [];
+      if (direction === 'current') return [current.key];
+      return nav.entries().filter((entry) => direction === 'back'
+        ? entry.index < current.index : entry.index > current.index).map((entry) => entry.key);
+    },
+  }).catch(() => []), signal);
 }
 
 interface NavigateToolParams {
@@ -237,8 +261,17 @@ class NavigateTool extends BaseBrowserToolExecutor {
     const signal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
     signal.throwIfAborted();
     const navigation = chrome.webNavigation;
-    const frames = await navigation?.getAllFrames?.({ tabId })?.catch(() => null);
-    const before = frames?.some((frame) => frame.frameId !== 0) ? await readTabHistory(tabId, signal) : undefined;
+    const frames = navigation?.getAllFrames
+      ? await readWithSignal(() => navigation.getAllFrames({ tabId }).catch(() => null), signal)
+      : null;
+    const hasChildren = frames?.some((frame) => frame.frameId !== 0);
+    const before = hasChildren ? await readTabHistory(tabId, signal) : undefined;
+    const frameDestinations = new Map<number, Set<string>>();
+    if (hasChildren && !before) {
+      for (const { frameId, result } of await readFrameHistoryKeys(tabId, direction, signal)) {
+        if (result?.length) frameDestinations.set(frameId, new Set(result));
+      }
+    }
     const destinations = before && new Set((direction === 'back'
       ? before.entries.slice(0, before.currentIndex)
       : before.entries.slice(before.currentIndex + 1)).map((entry) => entry.id));
@@ -265,11 +298,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const current = await chrome.tabs.get(tabId);
         // Chrome can report a child traversing pushState entries without a forward_back
         // qualifier. Confirm it reached an existing joint session-history entry.
-        if (childUpdated && destinations?.size && !childTraversed) {
+        if (childUpdated && !childTraversed) {
           childUpdated = false;
-          const history = await readTabHistory(tabId, signal);
-          const entry = history?.entries[history.currentIndex];
-          childTraversed = entry !== undefined && destinations.has(entry.id);
+          if (destinations?.size) {
+            const history = await readTabHistory(tabId, signal);
+            const entry = history?.entries[history.currentIndex];
+            childTraversed = entry !== undefined && destinations.has(entry.id);
+          } else if (frameDestinations.size) {
+            const currentEntries = await readFrameHistoryKeys(tabId, 'current', signal);
+            childTraversed = currentEntries.some(({ frameId, result }) => {
+              const key = result?.[0];
+              return key !== undefined && frameDestinations.get(frameId)?.has(key);
+            });
+          }
         }
         if (current.url && (current.url !== previousUrl || current.url === committedUrl || childTraversed)) {
           if (waitUntil === 'commit' || current.status === 'complete') return current;

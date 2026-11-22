@@ -1092,6 +1092,61 @@ describe('navigateTool', () => {
     }
   });
 
+  it.each(['back', 'forward'] as const)('checks frame-local history for %s when another debugger owns the tab', async (direction) => {
+    vi.useFakeTimers();
+    const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockRejectedValue(new Error('Debugger already attached'));
+    const event = { addListener: vi.fn(), removeListener: vi.fn() };
+    let key = 'unrelated-push';
+    const executeScript = vi.fn(async ({ args }) => [
+      { frameId: 4, result: [args[0] === direction ? 'existing-entry' : key] },
+      { frameId: 9, result: [args[0] === direction ? 'other-frame-entry' : 'existing-entry'] },
+    ]);
+    Object.assign(chrome, {
+      scripting: { executeScript },
+      webNavigation: { onHistoryStateUpdated: event, getAllFrames: async () => [{ frameId: 4 }, { frameId: 9 }] },
+    });
+    const notify = () => event.addListener.mock.calls[0][0]({ tabId: makeTab().id, frameId: 4, transitionQualifiers: [] });
+    const traverse = direction === 'back' ? mocks.tabsGoBack : mocks.tabsGoForward;
+    traverse.mockImplementation(async () => {
+      notify();
+      setTimeout(() => { key = 'existing-entry'; notify(); }, 300);
+    });
+    try {
+      const pending = navigateTool.execute({ url: direction, waitUntil: 'commit' }).then((result) => {
+        expect(key).toBe('existing-entry');
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(500);
+      expect((await pending).isError).toBe(false);
+      expect(executeScript).toHaveBeenCalledTimes(3);
+    } finally {
+      history.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a stalled frame-history read without traversing after the late reply', async () => {
+    const controller = new AbortController();
+    const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockRejectedValue(new Error('Debugger in use'));
+    let finishRead!: () => void;
+    const executeScript = vi.fn(() => new Promise<void>((resolve) => { finishRead = resolve; }));
+    Object.assign(chrome, {
+      scripting: { executeScript },
+      webNavigation: { getAllFrames: async () => [{ frameId: 4 }] },
+    });
+    try {
+      const pending = navigateTool.execute({ url: 'back' }, { signal: controller.signal });
+      await vi.waitFor(() => expect(executeScript).toHaveBeenCalledOnce());
+      controller.abort();
+      expect((await pending).isError).toBe(true);
+      finishRead();
+      await Promise.resolve();
+      expect(mocks.tabsGoBack).not.toHaveBeenCalled();
+    } finally {
+      history.mockRestore();
+    }
+  });
+
   it('recognizes a same-URL history entry and removes the commit listener', async () => {
     const event = { addListener: vi.fn(), removeListener: vi.fn() };
     Object.assign(chrome, { webNavigation: { onHistoryStateUpdated: event } });

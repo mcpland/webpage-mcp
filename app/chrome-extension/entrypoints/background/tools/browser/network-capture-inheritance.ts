@@ -1,20 +1,8 @@
+import { readWithSignal } from '@/utils/read-with-signal';
 import { NETWORK_CAPTURE_LIMITS } from './network-capture-limits';
 
-/** A read-only preparation step needs no cleanup if Chrome replies after cancellation. */
-export async function getCaptureTab(tabId: number, signal?: AbortSignal): Promise<chrome.tabs.Tab> {
-  signal?.throwIfAborted();
-  const tab = chrome.tabs.get(tabId);
-  if (!signal) return tab;
-  let onAbort!: () => void;
-  const aborted = new Promise<never>((_, reject) => {
-    onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([tab, aborted]);
-  } finally {
-    signal.removeEventListener('abort', onAbort);
-  }
+export function getCaptureTab(tabId: number, signal?: AbortSignal): Promise<chrome.tabs.Tab> {
+  return readWithSignal(() => chrome.tabs.get(tabId), signal);
 }
 
 /** Track children from the moment their opener starts extending a capture to them. */
