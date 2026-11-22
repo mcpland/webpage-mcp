@@ -76,7 +76,11 @@ if (window.__FILL_HELPER_INITIALIZED__) {
    * @param {string} value - Value to fill into the element
    * @returns {Promise<Object>} - Result of the fill operation
    */
-  async function fillElement(selector, value, ref = null) {
+  /**
+   * @param {boolean} [keepFocus] leave the field focused (no blur) so a
+   *   following Enter key press lands in it, as when a user types and submits.
+   */
+  async function fillElement(selector, value, ref = null, keepFocus = false) {
     try {
       // Find the element
       let element = null;
@@ -224,7 +228,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         element.focus();
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
-        element.blur();
+        if (!keepFocus) element.blur();
         return {
           success: true,
           message: `Checkbox set to ${element.checked}`,
@@ -239,7 +243,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         element.focus();
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
-        element.blur();
+        if (!keepFocus) element.blur();
         return {
           success: true,
           message: 'Radio selected',
@@ -262,7 +266,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         element.focus();
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
-        element.blur();
+        if (!keepFocus) element.blur();
         return {
           success: true,
           message: `Set range to ${element.value} (min: ${element.min}, max: ${element.max})`,
@@ -279,7 +283,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         element.focus();
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
-        element.blur();
+        if (!keepFocus) element.blur();
         return {
           success: true,
           message: `Set number input to ${element.value} (previous: ${previous})`,
@@ -320,8 +324,8 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         element.dispatchEvent(new Event('change', { bubbles: true }));
       }
 
-      // Blur the element
-      element.blur();
+      // Blur the element (like a user leaving the field) unless a submit follows
+      if (!keepFocus) element.blur();
 
       return {
         success: true,
@@ -379,7 +383,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
   // Listen for messages from the extension
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.action === 'fillElement') {
-      fillElement(request.selector, request.value, request.ref)
+      fillElement(request.selector, request.value, request.ref, request.keepFocus === true)
         .then(sendResponse)
         .catch((error) => {
           sendResponse({

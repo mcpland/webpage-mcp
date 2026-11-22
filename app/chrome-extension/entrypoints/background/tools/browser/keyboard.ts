@@ -12,7 +12,7 @@ import {
   runCdpInputWithDialogs,
   type CdpInputResult,
 } from '@/utils/cdp-input';
-import { parseDialogResponse } from '@/utils/dialog-tracker';
+import { parseDialogResponse, type DialogResponse } from '@/utils/dialog-tracker';
 import {
   isCompositeSelector,
   normalizeBrowserTargetSelector,
@@ -41,7 +41,7 @@ function sleep(ms: number): Promise<void> {
  * Dispatch `keys` over CDP. Key sequences become real key strokes; any other
  * input is inserted as literal text (see parseKeyboardInput).
  */
-async function dispatchKeySequence(
+export async function dispatchKeySequence(
   tabId: number,
   keys: string,
   delay: number,
@@ -62,6 +62,21 @@ async function dispatchKeySequence(
       await sleep(delay);
     }
   }
+}
+
+/**
+ * Press `keys` on whatever element has focus (real CDP key events), answering
+ * a JavaScript dialog they open as `dialog` says. Used to submit a field
+ * right after filling it, in the same tool call.
+ */
+export function pressKeysOnFocusedElement(
+  tabId: number,
+  keys: string,
+  dialog?: DialogResponse,
+): Promise<CdpInputResult> {
+  return runCdpInputWithDialogs(tabId, 'keyboard', () => dispatchKeySequence(tabId, keys, 0), {
+    dialog,
+  });
 }
 
 async function dispatchHelperKeySequence(

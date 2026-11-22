@@ -4,7 +4,10 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { ERROR_MESSAGES, TIMEOUTS } from '@/common/constants';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { clickTool, fillTool } from './interaction';
-import { keyboardTool } from './keyboard';
+import { dispatchKeySequence, keyboardTool, pressKeysOnFocusedElement } from './keyboard';
+
+/** Select everything in the focused field, then delete it (Ctrl+A is Select All on macOS too). */
+const CLEAR_FIELD_KEYS = 'Ctrl+a Backspace';
 import { screenshotTool } from './screenshot';
 import {
   screenshotContextManager,
@@ -81,6 +84,8 @@ interface ComputerParams {
   scrollDirection?: 'up' | 'down' | 'left' | 'right';
   scrollAmount?: number;
   text?: string; // for type/key
+  clear?: boolean; // type: select and delete the field's current text first
+  submit?: boolean; // type/fill/fill_form: press Enter afterwards
   repeat?: number; // for key action (1-100)
   modifiers?: Modifiers; // for click actions
   region?: ZoomRegion; // for zoom action
@@ -1111,7 +1116,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
         }
       }
       case 'type': {
-        if (!params.text)
+        // clear alone (no text) empties the field.
+        if (!params.text && params.clear !== true)
           return createErrorResponse(
             'Text parameter is required for type action',
           );
@@ -1134,15 +1140,21 @@ class ComputerTool extends BaseBrowserToolExecutor {
               );
             }
           }
-          const text = params.text;
+          const text = params.text || '';
+          const submit = params.submit === true;
           const input = await runCdpInputWithDialogs(
             tab.id!,
             'computer',
             async () => {
+              if (params.clear === true) {
+                await dispatchKeySequence(tab.id!, CLEAR_FIELD_KEYS, 0);
+              }
               // Use CDP insertText to avoid complex KeyboardEvent emulation for long text
-              await CDPHelper.insertText(tab.id!, text);
+              if (text) await CDPHelper.insertText(tab.id!, text);
+              if (submit) await dispatchKeySequence(tab.id!, 'Enter', 0);
             },
-            { dialog: dialogResponse, graceMs: 0 },
+            // Typing alone opens no dialogs; Enter may (confirm on submit).
+            { dialog: dialogResponse, ...(submit ? {} : { graceMs: 0 }) },
           );
           return {
             content: [
@@ -1153,7 +1165,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
                     {
                       success: true,
                       action: 'type',
-                      length: params.text.length,
+                      length: text.length,
+                      ...(params.clear === true ? { cleared: true } : {}),
+                      ...(submit ? { submitted: true } : {}),
                     },
                     input,
                   ),
@@ -1164,15 +1178,24 @@ class ComputerTool extends BaseBrowserToolExecutor {
           };
         } catch (e) {
           if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
-          // Fallback to DOM-based keyboard tool
-          const res = await keyboardTool.execute({
-            keys: params.text,
-            delay: 0,
-            selector: undefined,
-            tabId: tab.id,
-            windowId: tab.windowId,
-            background: params.background === true,
-          });
+          // Fallback to DOM-based keyboard tool, one step at a time
+          const steps = [
+            ...(params.clear === true ? [CLEAR_FIELD_KEYS] : []),
+            ...(params.text ? [params.text] : []),
+            ...(params.submit === true ? ['Enter'] : []),
+          ];
+          let res: ToolResult = createErrorResponse('Nothing to type');
+          for (const keys of steps) {
+            res = await keyboardTool.execute({
+              keys,
+              delay: 0,
+              selector: undefined,
+              tabId: tab.id,
+              windowId: tab.windowId,
+              background: params.background === true,
+            });
+            if (res.isError) return res;
+          }
           return res;
         }
       }
@@ -1192,6 +1215,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
           tabId: tab.id,
           windowId: tab.windowId,
           background: params.background === true,
+          submit: params.submit === true,
+          dialog: (params as any).dialog,
         } as any);
         return res;
       }
@@ -1213,7 +1238,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           ok: boolean;
           error?: string;
         }> = [];
-        for (const item of elements) {
+        for (const [index, item] of elements.entries()) {
           const target = item?.ref
             ? { ref: String(item.ref) }
             : item?.selector
@@ -1232,6 +1257,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
               tabId: tab.id,
               windowId: tab.windowId,
               background: params.background === true,
+              // The submit Enter below lands in the last field.
+              keepFocus: params.submit === true && index === elements.length - 1,
             } as any);
             const ok = !r.isError;
             results.push({
@@ -1248,17 +1275,38 @@ class ComputerTool extends BaseBrowserToolExecutor {
           }
         }
         const successCount = results.filter((r) => r.ok).length;
+        // Submit with Enter in the last field (filled with keepFocus), and
+        // only when every field was filled: a half-filled form stays unsent.
+        let submitInput: CdpInputResult | undefined;
+        let submitError: string | undefined;
+        if (params.submit === true) {
+          if (successCount !== results.length) {
+            submitError = 'not submitted because some fields could not be filled';
+          } else {
+            try {
+              submitInput = await pressKeysOnFocusedElement(tab.id!, 'Enter', dialogResponse);
+            } catch (e) {
+              submitError = `pressing Enter to submit failed: ${e instanceof Error ? e.message : String(e)}`;
+            }
+          }
+        }
+        const formPayload: Record<string, unknown> = {
+          success: successCount === results.length && !submitError,
+          action: 'fill_form',
+          filled: successCount,
+          total: results.length,
+          results,
+          ...(params.submit === true
+            ? { submitted: !submitError, ...(submitError ? { submitError } : {}) }
+            : {}),
+        };
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({
-                success: successCount === results.length,
-                action: 'fill_form',
-                filled: successCount,
-                total: results.length,
-                results,
-              }),
+              text: JSON.stringify(
+                submitInput ? withDialogOutcome(formPayload, submitInput) : formPayload,
+              ),
             },
           ],
           // A form where nothing could be filled is a failed action.

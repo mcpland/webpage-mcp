@@ -16,6 +16,7 @@ import {
 } from '@/utils/cdp-input';
 import { parseDialogResponse, type DialogResponse } from '@/utils/dialog-tracker';
 import { waitForDownload } from './download';
+import { pressKeysOnFocusedElement } from './keyboard';
 import {
   getResolvedViewportCoordinates,
   isCompositeSelector,
@@ -583,6 +584,10 @@ interface FillToolParams {
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
   background?: boolean; // when true, do not activate tab or focus window
+  submit?: boolean; // press Enter in the field after filling it
+  dialog?: unknown; // how to answer a JavaScript dialog the submit opens
+  /** Internal: leave the field focused for a following key press (implied by submit). */
+  keepFocus?: boolean;
 }
 
 /**
@@ -620,6 +625,13 @@ class FillTool extends BaseBrowserToolExecutor {
     if (value === undefined || value === null) {
       return createErrorResponse(
         ERROR_MESSAGES.INVALID_PARAMETERS + ': Value must be provided',
+      );
+    }
+
+    const dialogResponse = parseDialogResponse(args.dialog);
+    if (dialogResponse instanceof Error) {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: ${dialogResponse.message}`,
       );
     }
 
@@ -696,6 +708,7 @@ class FillTool extends BaseBrowserToolExecutor {
           selector: finalSelector,
           ref: finalRef,
           value,
+          ...(args.submit === true || args.keepFocus === true ? { keepFocus: true } : {}),
         },
         frameId,
       );
@@ -704,14 +717,35 @@ class FillTool extends BaseBrowserToolExecutor {
         return createErrorResponse(result.error);
       }
 
+      // keepFocus left the field focused, so Enter lands in it.
+      let submitInput: CdpInputResult | undefined;
+      if (args.submit === true) {
+        try {
+          submitInput = await pressKeysOnFocusedElement(targetTabId, 'Enter', dialogResponse);
+        } catch (error) {
+          return createErrorResponse(
+            `The field was filled, but pressing Enter to submit failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+      const pendingDialog =
+        submitInput?.dialog && submitInput.dialog.handled === false ? submitInput.dialog : undefined;
+
       return {
         content: [
           {
             type: 'text',
             text: JSON.stringify({
               success: true,
-              message: result.message || 'Fill operation successful',
+              message: pendingDialog
+                ? `Filled and submitted. ${pendingDialogHint(pendingDialog)}`
+                : result.message || 'Fill operation successful',
               elementInfo: result.elementInfo,
+              ...(args.submit === true ? { submitted: true } : {}),
+              ...(submitInput?.dialog ? { dialog: submitInput.dialog } : {}),
+              ...(submitInput?.dialogs ? { dialogs: submitInput.dialogs } : {}),
             }),
           },
         ],

@@ -98,6 +98,34 @@ describe('fill-helper bounded shadow search', () => {
     expect(second.value).toBe('');
   });
 
+  it.each([
+    ['text input', '<input id="field" />', 'typed'],
+    ['checkbox', '<input id="field" type="checkbox" />', true],
+    ['select', '<select id="field"><option value="a">A</option><option value="b">B</option></select>', 'b'],
+  ])('keeps a %s focused only when keepFocus is set', async (_kind, markup, value) => {
+    document.body.innerHTML = markup;
+    const field = document.getElementById('field')!;
+    // jsdom has no layout; the helper checks the field is the topmost element.
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn().mockReturnValue(field),
+    });
+    const listener = loadHelper();
+
+    const blurred = await dispatch(listener, { action: 'fillElement', selector: '#field', value });
+    expect(blurred).toMatchObject({ success: true });
+    expect(document.activeElement).not.toBe(field);
+
+    const kept = await dispatch(listener, {
+      action: 'fillElement',
+      selector: '#field',
+      value,
+      keepFocus: true,
+    });
+    expect(kept).toMatchObject({ success: true });
+    expect(document.activeElement).toBe(field);
+  });
+
   it('does not search beyond the bounded BFS frontier', async () => {
     const { root } = createHost();
     const fragment = document.createDocumentFragment();

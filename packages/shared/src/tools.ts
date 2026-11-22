@@ -1397,6 +1397,16 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             "Value to set for action=fill (string | boolean | number)",
         },
+        clear: {
+          type: "boolean",
+          description:
+            "For action=type: select and delete the focused field's current text before typing (with no text, just empties the field).",
+        },
+        submit: {
+          type: "boolean",
+          description:
+            "For action=type/fill/fill_form: press Enter afterwards to submit (fill_form presses it in the last field, and only when every field was filled). Use dialog to answer a confirm the submit opens.",
+        },
         elements: {
           type: "array",
           description:
@@ -2294,6 +2304,12 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             "Fill without activating/focusing the target tab. Default: false for reliable focus and DOM interaction. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.",
         },
+        submit: {
+          type: "boolean",
+          description:
+            "Press Enter in the field after filling it, submitting search boxes, login forms and chat inputs in the same call (default: false).",
+        },
+        dialog: DIALOG_RESPONSE_SCHEMA,
       },
       required: ["value"],
     },
