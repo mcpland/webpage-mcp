@@ -179,4 +179,63 @@ describe('network capture backend boundaries', () => {
     expect(payload.stoppedBy).toBe('max_capture_time');
     expect(networkDebuggerStartTool.hasAvailableCapture()).toBe(false);
   });
+
+  it('coalesces concurrent auto-stop and explicit stop without leaving stale cached results', async () => {
+    const { networkDebuggerStartTool } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-debugger'
+    );
+    await (networkDebuggerStartTool as any).startCaptureForTab(7, {
+      maxCaptureTime: 30_000,
+      inactivityTimeout: 10_000,
+      includeStatic: true,
+      rootTabId: 7,
+      lineageDepth: 0,
+      deadlineAt: Date.now() + 30_000,
+    });
+
+    let releaseDisable!: () => void;
+    cdp.sendCommand.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseDisable = () => resolve({});
+        }),
+    );
+
+    const autoStop = networkDebuggerStartTool.stopCapture(7, true, 'inactivity_timeout');
+    const explicitStop = networkDebuggerStartTool.stopCapture(7, false, 'user_request');
+    releaseDisable();
+
+    const [autoResult, explicitResult] = await Promise.all([autoStop, explicitStop]);
+    expect(autoResult.success).toBe(true);
+    expect(explicitResult.success).toBe(true);
+    expect(networkDebuggerStartTool.hasAvailableCapture()).toBe(false);
+  });
+
+  it('stops inherited child captures when stopLineageCaptures is called', async () => {
+    const { networkCaptureStartTool } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-web-request'
+    );
+    vi.mocked(chrome.tabs.get).mockImplementation(async (id: number) => tab(id));
+    await (networkCaptureStartTool as any).startCaptureForTab(7, {
+      maxCaptureTime: 30_000,
+      inactivityTimeout: 10_000,
+      includeStatic: true,
+      rootTabId: 7,
+      lineageDepth: 0,
+      deadlineAt: Date.now() + 30_000,
+    });
+    await (networkCaptureStartTool as any).startCaptureForTab(8, {
+      maxCaptureTime: 30_000,
+      inactivityTimeout: 10_000,
+      includeStatic: true,
+      rootTabId: 7,
+      lineageDepth: 1,
+      deadlineAt: Date.now() + 30_000,
+    });
+
+    await networkCaptureStartTool.stopCapture(7);
+    await networkCaptureStartTool.stopLineageCaptures(7);
+
+    expect(networkCaptureStartTool.hasAvailableCapture()).toBe(false);
+  });
 });

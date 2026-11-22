@@ -333,4 +333,62 @@ describe('keyboardTool', () => {
     expect(tryGetTab).toHaveBeenCalledWith(7);
     expect(injectContentScript).not.toHaveBeenCalled();
   });
+
+  it('injects accessibility helper into all frames for composite selectors', async () => {
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue(
+      makeTab({ url: 'https://example.com/' }),
+    );
+    const injectContentScript = vi
+      .spyOn(keyboardTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    vi.spyOn(keyboardTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({ success: true, ref: 'ref_1' })
+      .mockResolvedValueOnce({ success: true, selector: '#field' })
+      .mockResolvedValueOnce({ success: true });
+    mocks.attach.mockResolvedValue(undefined);
+    mocks.detach.mockResolvedValue(undefined);
+    mocks.sendCommand.mockResolvedValue({});
+
+    const result = await keyboardTool.execute({
+      tabId: 7,
+      keys: 'Enter',
+      selector: 'iframe#child |> #field',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(injectContentScript).toHaveBeenNthCalledWith(
+      1,
+      7,
+      ['inject-scripts/accessibility-tree-helper.js'],
+      false,
+      'ISOLATED',
+      true,
+    );
+  });
+
+  it('does not fall back to DOM helper when CDP fails after key dispatch starts', async () => {
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue(
+      makeTab({ url: 'https://example.com/' }),
+    );
+    const injectContentScript = vi
+      .spyOn(keyboardTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    mocks.attach.mockResolvedValueOnce(undefined);
+    mocks.detach.mockResolvedValueOnce(undefined);
+    mocks.sendCommand.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Input.dispatchKeyEvent') throw new Error('Detached mid-key');
+      return {};
+    });
+
+    const result = await keyboardTool.execute({
+      tabId: 7,
+      keys: 'Enter',
+      background: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string }).text)).toContain('Detached mid-key');
+    expect(injectContentScript).not.toHaveBeenCalled();
+  });
 });

@@ -6,6 +6,7 @@ import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { hasDisallowedPublicUrlScheme } from './common';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
+  CdpUnavailableError,
   isTimeoutError,
   PageUnresponsiveError,
   pendingDialogHint,
@@ -15,8 +16,9 @@ import {
   type DialogOutcome,
 } from '@/utils/cdp-input';
 import { parseDialogResponse, type DialogResponse } from '@/utils/dialog-tracker';
+import { parseKeyboardInput } from '@/utils/cdp-keyboard';
 import { waitForDownload } from './download';
-import { pressKeysOnFocusedElement } from './keyboard';
+import { keyboardTool, pressKeysOnFocusedElement } from './keyboard';
 import {
   getResolvedViewportCoordinates,
   isCompositeSelector,
@@ -83,36 +85,39 @@ async function dispatchNativeClick(
   return runCdpInputWithDialogs(
     tabId,
     'click',
-    async () => {
-    await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: Math.round(coordinates.x),
-      y: Math.round(coordinates.y),
-      button: 'none',
-      buttons: 0,
-      modifiers,
-    });
-
-    for (let index = 1; index <= clickCount; index += 1) {
+    async (signal) => {
+      if (signal.aborted) return;
       await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
-        type: 'mousePressed',
+        type: 'mouseMoved',
         x: Math.round(coordinates.x),
         y: Math.round(coordinates.y),
-        button,
-        buttons: buttonMask,
-        clickCount: index,
-        modifiers,
-      });
-      await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
-        type: 'mouseReleased',
-        x: Math.round(coordinates.x),
-        y: Math.round(coordinates.y),
-        button,
+        button: 'none',
         buttons: 0,
-        clickCount: index,
         modifiers,
       });
-    }
+
+      for (let index = 1; index <= clickCount; index += 1) {
+        if (signal.aborted) return;
+        await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+          type: 'mousePressed',
+          x: Math.round(coordinates.x),
+          y: Math.round(coordinates.y),
+          button,
+          buttons: buttonMask,
+          clickCount: index,
+          modifiers,
+        });
+        if (signal.aborted) return;
+        await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+          type: 'mouseReleased',
+          x: Math.round(coordinates.x),
+          y: Math.round(coordinates.y),
+          button,
+          buttons: 0,
+          clickCount: index,
+          modifiers,
+        });
+      }
     },
     { dialog: options.dialog },
   );
@@ -283,7 +288,9 @@ class ClickTool extends BaseBrowserToolExecutor {
       };
     }
 
-    await this.injectAccessibilityHelper(tabId, targetFrameId);
+    await this.injectAccessibilityHelper(tabId, targetFrameId, {
+      allFrames: !ref && isCompositeSelector(selector),
+    });
 
     if (!ref && selector) {
       const selectorFrameId = isCompositeSelector(selector)
@@ -369,7 +376,10 @@ class ClickTool extends BaseBrowserToolExecutor {
   /**
    * Execute click operation
    */
-  async execute(args: ClickToolParams): Promise<ToolResult> {
+  async execute(
+    args: ClickToolParams,
+    context?: { signal?: AbortSignal },
+  ): Promise<ToolResult> {
     const {
       selector,
       selectorType = 'css',
@@ -405,6 +415,11 @@ class ClickTool extends BaseBrowserToolExecutor {
     // Armed right before the click so the download it triggers is caught
     // without racing a separate chrome_handle_download call.
     const downloadAbort = new AbortController();
+    const onCallerAbort = () => downloadAbort.abort();
+    if (context?.signal) {
+      if (context.signal.aborted) downloadAbort.abort();
+      else context.signal.addEventListener('abort', onCallerAbort, { once: true });
+    }
 
     try {
       // Resolve tab
@@ -445,6 +460,11 @@ class ClickTool extends BaseBrowserToolExecutor {
       // The DOM fallback cannot observe dialogs. Bound its wait so a click that
       // opens a modal dialog reports an unresponsive page instead of hanging.
       const runHelperClick = async (): Promise<void> => {
+        if (dialogResponse) {
+          throw new HelperClickError(
+            'Automatic dialog responses require a debugger connection. No fallback click was dispatched.',
+          );
+        }
         transport = 'helper';
         let helperResult: any;
         try {
@@ -460,7 +480,14 @@ class ClickTool extends BaseBrowserToolExecutor {
         }
         if (helperResult?.error) throw new HelperClickError(String(helperResult.error));
         navigationOccurred = helperResult?.navigationOccurred === true;
-        elementInfo = helperResult?.elementInfo || elementInfo;
+        if (helperResult?.elementInfo) {
+          elementInfo = {
+            ...elementInfo,
+            ...helperResult.elementInfo,
+            ...(elementInfo.ref !== undefined ? { ref: elementInfo.ref } : {}),
+            ...(elementInfo.frameId !== undefined ? { frameId: elementInfo.frameId } : {}),
+          };
+        }
       };
 
       const pendingDownload = downloadWait
@@ -501,8 +528,13 @@ class ClickTool extends BaseBrowserToolExecutor {
             if (cdpError instanceof PageUnresponsiveError) {
               return createErrorResponse(cdpError.message);
             }
+            if (!(cdpError instanceof CdpUnavailableError)) {
+              return createErrorResponse(
+                `CDP click failed: ${cdpError instanceof Error ? cdpError.message : String(cdpError)}`,
+              );
+            }
             console.warn(
-              '[ClickTool] CDP click failed, falling back to helper',
+              '[ClickTool] CDP click unavailable, falling back to helper',
               cdpError,
             );
             await runHelperClick();
@@ -527,9 +559,10 @@ class ClickTool extends BaseBrowserToolExecutor {
         );
       }
       const pendingDialog = dialog && dialog.handled === false ? dialog : undefined;
-      // A dialog still waiting for an answer blocks the page; don't wait for a download behind it.
-      if (pendingDialog) downloadAbort.abort();
-      const downloadOutcome = pendingDownload && !pendingDialog ? await pendingDownload : undefined;
+      // A dialog or frozen page blocks the tab; don't wait for a download behind it.
+      if (pendingDialog || pageUnresponsive) downloadAbort.abort();
+      const downloadOutcome =
+        pendingDownload && !pendingDialog && !pageUnresponsive ? await pendingDownload : undefined;
       if (downloadOutcome && 'downloadError' in downloadOutcome) {
         warnings.push(`waitForDownload: ${downloadOutcome.downloadError}`);
       }
@@ -567,6 +600,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       );
     } finally {
       // Release the download listener on every exit path (a no-op once settled).
+      context?.signal?.removeEventListener('abort', onCallerAbort);
       downloadAbort.abort();
     }
   }
@@ -723,11 +757,28 @@ class FillTool extends BaseBrowserToolExecutor {
         try {
           submitInput = await pressKeysOnFocusedElement(targetTabId, 'Enter', dialogResponse);
         } catch (error) {
-          return createErrorResponse(
-            `The field was filled, but pressing Enter to submit failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
+          if (error instanceof CdpUnavailableError && !dialogResponse) {
+            const fallback = await keyboardTool.sendHelperSteps(
+              targetTabId,
+              'Enter',
+              parseKeyboardInput('Enter'),
+              0,
+              { frameId },
+            );
+            if (fallback.isError) {
+              const fallbackMessage =
+                fallback.content.find((block) => block.type === 'text')?.text || 'submit failed';
+              return createErrorResponse(
+                `The field was filled, but pressing Enter to submit failed: ${fallbackMessage}`,
+              );
+            }
+          } else {
+            return createErrorResponse(
+              `The field was filled, but pressing Enter to submit failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
         }
       }
       const pendingDialog =

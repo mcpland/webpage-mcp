@@ -120,6 +120,23 @@ describe('accessibility-tree-helper resource boundaries', () => {
     expect(tree).toContain('generic "Quarterly report"');
   });
 
+  it('keeps lowercase SVG style text out of labels', () => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+    style.append(document.createTextNode('.hidden-css { fill: red; }'));
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    title.append(document.createTextNode('Chart label'));
+    svg.append(style, title);
+    const button = document.createElement('button');
+    button.append(svg);
+    document.body.append(button);
+
+    const tree = loadHelper()(null).pageContent;
+
+    expect(tree).toContain('Chart label');
+    expect(tree).not.toContain('hidden-css');
+  });
+
   it('collapses wrapper chains that repeat the same text', () => {
     document.body.innerHTML =
       '<div class="a"><div class="b"><div class="c"><span>Quarterly revenue report</span></div></div></div>' +

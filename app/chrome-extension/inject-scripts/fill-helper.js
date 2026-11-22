@@ -109,29 +109,32 @@ if (window.__FILL_HELPER_INITIALIZED__) {
       }
 
       // Get element information
-      const rect = element.getBoundingClientRect();
+      const targetLabel = selector || ref || 'unknown';
+      const initialRect = element.getBoundingClientRect();
+      // Check layout visibility (display/visibility/opacity/non-zero box) first,
+      // then scroll offscreen elements into view before checking viewport hit-testing.
+      const initiallyRendered = isElementRendered(element);
       const elementInfo = {
         tagName: element.tagName,
         id: element.id,
         className: element.className,
         type: element.type || null,
-        isVisible: isElementVisible(element),
+        isVisible: initiallyRendered,
         rect: {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-          top: rect.top,
-          right: rect.right,
-          bottom: rect.bottom,
-          left: rect.left,
+          x: initialRect.x,
+          y: initialRect.y,
+          width: initialRect.width,
+          height: initialRect.height,
+          top: initialRect.top,
+          right: initialRect.right,
+          bottom: initialRect.bottom,
+          left: initialRect.left,
         },
       };
 
-      // Check if element is visible
-      if (!elementInfo.isVisible) {
+      if (!initiallyRendered) {
         return {
-          error: `Element with selector "${selector}" is not visible`,
+          error: `Element "${targetLabel}" is not visible`,
           elementInfo,
         };
       }
@@ -168,19 +171,19 @@ if (window.__FILL_HELPER_INITIALIZED__) {
             element = findFillableInShadowRoot(sr) || element;
             if (!validTags.includes(element.tagName)) {
               return {
-                error: `Element with selector "${selector}" is not a fillable element (must be INPUT, TEXTAREA, or SELECT)`,
+                error: `Element "${targetLabel}" is not a fillable element (must be INPUT, TEXTAREA, or SELECT)`,
                 elementInfo,
               };
             }
           } else {
             return {
-              error: `Element with selector "${selector}" is not a fillable element (must be INPUT, TEXTAREA, or SELECT)`,
+              error: `Element "${targetLabel}" is not a fillable element (must be INPUT, TEXTAREA, or SELECT)`,
               elementInfo,
             };
           }
         } catch (_) {
           return {
-            error: `Element with selector "${selector}" is not a fillable element (must be INPUT, TEXTAREA, or SELECT)`,
+            error: `Element "${targetLabel}" is not a fillable element (must be INPUT, TEXTAREA, or SELECT)`,
             elementInfo,
           };
         }
@@ -193,14 +196,35 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         element.type !== null
       ) {
         return {
-          error: `Input element with selector "${selector}" has type "${element.type}" which is not fillable`,
+          error: `Input element "${targetLabel}" has type "${element.type}" which is not fillable`,
           elementInfo,
         };
       }
 
-      // Scroll element into view
-      element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Scroll element into view before viewport/occlusion visibility checks
+      if (typeof element.scrollIntoView === 'function') {
+        element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      const rect = element.getBoundingClientRect();
+      elementInfo.rect = {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left,
+      };
+      elementInfo.isVisible = isElementVisible(element);
+      if (!elementInfo.isVisible) {
+        return {
+          error: `Element "${targetLabel}" is not visible`,
+          elementInfo,
+        };
+      }
 
       // Focus the element
       element.focus();
@@ -343,11 +367,11 @@ if (window.__FILL_HELPER_INITIALIZED__) {
   }
 
   /**
-   * Check if an element is visible
-   * @param {Element} element - The element to check
-   * @returns {boolean} - Whether the element is visible
+   * Check whether an element has rendered box geometry (may still be offscreen).
+   * @param {Element} element
+   * @returns {boolean}
    */
-  function isElementVisible(element) {
+  function isElementRendered(element) {
     if (!element) return false;
 
     const style = window.getComputedStyle(element);
@@ -356,9 +380,18 @@ if (window.__FILL_HELPER_INITIALIZED__) {
     }
 
     const rect = element.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-      return false;
-    }
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  /**
+   * Check if an element is visible
+   * @param {Element} element - The element to check
+   * @returns {boolean} - Whether the element is visible
+   */
+  function isElementVisible(element) {
+    if (!isElementRendered(element)) return false;
+
+    const rect = element.getBoundingClientRect();
 
     // Check if element is within viewport
     if (
@@ -377,7 +410,25 @@ if (window.__FILL_HELPER_INITIALIZED__) {
     const elementAtPoint = document.elementFromPoint(centerX, centerY);
     if (!elementAtPoint) return false;
 
-    return element === elementAtPoint || element.contains(elementAtPoint);
+    let current = element;
+    while (current) {
+      if (current === elementAtPoint || current.contains(elementAtPoint)) {
+        return true;
+      }
+      const root = typeof current.getRootNode === 'function' ? current.getRootNode() : null;
+      if (root && root !== document && root.host) {
+        if (typeof root.elementFromPoint === 'function') {
+          const shadowHit = root.elementFromPoint(centerX, centerY);
+          if (shadowHit && shadowHit !== current && !current.contains(shadowHit)) {
+            return false;
+          }
+        }
+        current = root.host;
+      } else {
+        break;
+      }
+    }
+    return false;
   }
 
   // Listen for messages from the extension

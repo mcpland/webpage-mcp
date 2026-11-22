@@ -339,4 +339,42 @@ describe('handleDownloadTool', () => {
     await expect(pending).rejects.toThrow('Download wait cancelled');
     expect(chrome.downloads.onCreated.removeListener).toHaveBeenCalled();
   });
+
+  it('forwards context.signal to handleDownloadTool.execute', async () => {
+    const controller = new AbortController();
+    (chrome.downloads.search as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const pending = handleDownloadTool.execute(
+      { waitForComplete: true, timeoutMs: 60000 },
+      { signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(createdListener).toBeTypeOf('function'));
+    controller.abort();
+    const result = await pending;
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text)).toContain('Download wait cancelled');
+  });
+
+  it('ignores onChanged events for historical downloads outside the lookback window', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-30T00:05:00.000Z'));
+    const historical = {
+      id: 99,
+      filename: '/Users/alice/Downloads/old-report.txt',
+      state: 'complete',
+      startTime: '2026-03-30T00:00:00.000Z', // 5 minutes ago (> 60s lookback)
+    };
+    const search = chrome.downloads.search as ReturnType<typeof vi.fn>;
+    search.mockImplementation(async (query?: { id?: number }) =>
+      query?.id === 99 ? [historical] : [],
+    );
+
+    const pending = handleDownloadTool.execute({ timeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(10);
+    changedListener?.({ id: 99 } as chrome.downloads.DownloadDelta);
+    await vi.advanceTimersByTimeAsync(1200);
+    const result = await pending;
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text)).toContain('Download wait timed out');
+  });
 });

@@ -165,21 +165,32 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       let allowEdit = element.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
 
       // keypress is deprecated, but simulate if it's a character key or Enter
-      // Only dispatch if keydown was not cancelled and it's a character producing key
-      if (allowEdit && (key.length === 1 || key === 'Enter' || key === ' ')) {
+      // Only dispatch if keydown was not cancelled, no command modifier is held,
+      // and it's a character producing key.
+      const commandHeld = Boolean(modifiers?.ctrlKey || modifiers?.metaKey || modifiers?.altKey);
+      if (allowEdit && !commandHeld && (key.length === 1 || key === 'Enter' || key === ' ')) {
         const keypressOptions = { ...eventOptions };
         if (charCode) keypressOptions.charCode = charCode;
         allowEdit = element.dispatchEvent(new KeyboardEvent('keypress', keypressOptions));
       }
 
-      const activateOnRelease = key === ' ' && element.matches(SPACE_CONTROL_SELECTOR);
-      let releaseAllowed;
+      const activateOnRelease = key === ' ' && !commandHeld && element.matches(SPACE_CONTROL_SELECTOR);
+      let releaseAllowed = false;
+      let expired = false;
       try {
-        if (Date.now() >= deadline) throw new Error('Keyboard operation expired');
+        if (Date.now() >= deadline) {
+          expired = true;
+          throw new Error('Keyboard operation expired');
+        }
         if (allowEdit && !activateOnRelease) edit?.();
       } finally {
-        const releaseTarget = focusedElement();
-        releaseAllowed = releaseTarget.dispatchEvent(new KeyboardEvent('keyup', eventOptions)) && releaseTarget === element;
+        if (!expired && !(Date.now() >= deadline)) {
+          const releaseTarget = focusedElement();
+          releaseAllowed =
+            Boolean(releaseTarget) &&
+            releaseTarget.dispatchEvent(new KeyboardEvent('keyup', eventOptions)) &&
+            releaseTarget === element;
+        }
       }
       if (activateOnRelease && allowEdit && releaseAllowed && focusedElement() === element) {
         if (Date.now() >= deadline) throw new Error('Keyboard operation expired');
@@ -196,36 +207,87 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
   }
 
   function focusedElement() {
-    let element = document.activeElement || document.body;
-    while (element.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
+    let element = document.activeElement || document.body || document.documentElement;
+    while (element?.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
     return element;
+  }
+
+  function isTabCandidate(node) {
+    if (!(node instanceof HTMLElement) || node.closest('[inert], [hidden]') ||
+        node.matches(':disabled, input[type=hidden]')) return false;
+    if (node.checkVisibility && !node.checkVisibility({ visibilityProperty: true })) return false;
+    if (node.tabIndex >= 0) return true;
+    if (!node.hasAttribute('tabindex') && node.isContentEditable && !node.parentElement?.isContentEditable) {
+      return true;
+    }
+    return false;
+  }
+
+  function shadowRootHasFocusable(shadowRoot) {
+    if (shadowRoot.delegatesFocus) return true;
+    for (const child of shadowRoot.querySelectorAll('*')) {
+      if (isTabCandidate(child)) return true;
+      if (child.shadowRoot && shadowRootHasFocusable(child.shadowRoot)) return true;
+    }
+    return false;
   }
 
   function moveTabFocus(element, backward) {
     const root = element.getRootNode();
-    // A shadow host or frame is a focus-navigation boundary. Don't skip it
-    // and apply subsequent keys to an unrelated control in this document.
+    // A shadow host with focusable descendants or a frame is a focus-navigation
+    // boundary. Don't skip it and apply subsequent keys to an unrelated control.
     const candidates = Array.from(root.querySelectorAll('*')).filter((node) => {
-      if (!(node instanceof HTMLElement) || node.closest('[inert], [hidden]') ||
-          node.matches(':disabled, input[type=hidden]')) return false;
-      if (node.checkVisibility && !node.checkVisibility({ visibilityProperty: true })) return false;
-      return node.tabIndex >= 0 || (!node.hasAttribute('tabindex') &&
-        (node.shadowRoot || node.isContentEditable && !node.parentElement?.isContentEditable));
+      if (isTabCandidate(node)) return true;
+      if (
+        node instanceof HTMLElement &&
+        !node.closest('[inert], [hidden]') &&
+        !node.matches(':disabled') &&
+        (!node.checkVisibility || node.checkVisibility({ visibilityProperty: true })) &&
+        !node.hasAttribute('tabindex') &&
+        node.shadowRoot &&
+        shadowRootHasFocusable(node.shadowRoot)
+      ) {
+        return true;
+      }
+      return false;
     });
     const stops = candidates.filter((node) => {
       if (!node.matches('input[type=radio]') || !node.name) return true;
       const group = candidates.filter((other) => other.type === 'radio' &&
         other.name === node.name && other.form === node.form);
+      const activeInGroup = group.includes(element) ? element : null;
       return node === (group.find((radio) => radio.checked) ||
+        activeInGroup ||
         (backward ? group[group.length - 1] : group[0]));
     });
     const rank = (node) => node.tabIndex > 0 ? node.tabIndex : Infinity;
     stops.sort((a, b) => rank(a) - rank(b));
     const index = stops.indexOf(element);
-    const next = index < 0 && element === document.body
-      ? stops[backward ? stops.length - 1 : 0]
-      : index >= 0 && stops[index + (backward ? -1 : 1)];
-    if (!next || next.matches('iframe, frame, object, embed') || next.shadowRoot) {
+    let next;
+    if (index >= 0) {
+      next = stops[index + (backward ? -1 : 1)];
+    } else if (element === document.body || element === document.documentElement) {
+      next = stops[backward ? stops.length - 1 : 0];
+    } else {
+      // Programmatically focused container (e.g. tabindex="-1"): advance in tree order.
+      const naturalStops = stops.filter((node) => node.tabIndex <= 0);
+      if (backward) {
+        for (let i = naturalStops.length - 1; i >= 0; i -= 1) {
+          if (element.compareDocumentPosition(naturalStops[i]) & Node.DOCUMENT_POSITION_PRECEDING) {
+            next = naturalStops[i];
+            break;
+          }
+        }
+      } else {
+        for (let i = 0; i < naturalStops.length; i += 1) {
+          if (element.compareDocumentPosition(naturalStops[i]) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            next = naturalStops[i];
+            break;
+          }
+        }
+      }
+    }
+    if (!next || next.matches('iframe, frame, object, embed') || (next.shadowRoot && shadowRootHasFocusable(next.shadowRoot))) {
       throw new Error('Tab leaves the available focus scope; use an explicit element ref');
     }
     next.focus();
@@ -262,6 +324,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     if (!isTextField(element) || element.readOnly || element.matches(':disabled')) {
       throw new Error('The focused element is not editable');
     }
+    if (focusedElement() !== element) throw new Error('The editing target lost focus');
     const inputTypes = {
       insertText: 'insertText', delete: 'deleteContentBackward',
       forwardDelete: 'deleteContentForward', insertLineBreak: 'insertLineBreak',

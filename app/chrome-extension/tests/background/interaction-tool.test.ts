@@ -402,8 +402,7 @@ describe('interaction tools', () => {
       ['inject-scripts/accessibility-tree-helper.js'],
       false,
       'ISOLATED',
-      false,
-      [0],
+      true,
     );
     expect(injectContentScript).toHaveBeenNthCalledWith(
       2,
@@ -502,5 +501,79 @@ describe('interaction tools', () => {
     );
     expect(tryGetTab).toHaveBeenCalledWith(7);
     expect(injectContentScript).not.toHaveBeenCalled();
+  });
+
+  it('refuses DOM helper fallback when dialog auto-handling is requested and CDP is unavailable', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue(
+      makeTab({ url: 'https://example.com/' }),
+    );
+    const injectContentScript = vi
+      .spyOn(clickTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    mocks.attach.mockRejectedValueOnce(new Error('Debugger busy'));
+
+    const result = await clickTool.execute({
+      tabId: 7,
+      coordinates: { x: 10, y: 20 },
+      dialog: 'accept',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string }).text)).toContain(
+      'Automatic dialog responses require a debugger connection',
+    );
+    expect(injectContentScript).not.toHaveBeenCalled();
+  });
+
+  it('does not double-click via DOM helper when CDP fails after dispatch starts', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue(
+      makeTab({ url: 'https://example.com/' }),
+    );
+    const injectContentScript = vi
+      .spyOn(clickTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    mocks.attach.mockResolvedValueOnce(undefined);
+    mocks.detach.mockResolvedValueOnce(undefined);
+    mocks.sendCommand.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Input.dispatchMouseEvent') throw new Error('Detached mid-click');
+      return {};
+    });
+
+    const result = await clickTool.execute({
+      tabId: 7,
+      coordinates: { x: 10, y: 20 },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string }).text)).toContain('Detached mid-click');
+    expect(injectContentScript).not.toHaveBeenCalled();
+  });
+
+  it('falls back to keyboard helper for fill submit when CDP is unavailable', async () => {
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue(
+      makeTab({ url: 'https://example.com/' }),
+    );
+    vi.spyOn(fillTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(fillTool as any, 'sendMessageToTab').mockResolvedValue({ success: true });
+    mocks.attach.mockRejectedValueOnce(new Error('Debugger busy'));
+    const { keyboardTool } = await import('@/entrypoints/background/tools/browser/keyboard');
+    const helperSpy = vi
+      .spyOn(keyboardTool, 'sendHelperSteps')
+      .mockResolvedValue({ content: [], isError: false });
+
+    const result = await fillTool.execute({
+      tabId: 7,
+      selector: '#q',
+      value: 'query',
+      submit: true,
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(String((result.content[0] as { text?: string }).text))).toMatchObject({
+      success: true,
+      submitted: true,
+    });
+    expect(helperSpy).toHaveBeenCalledOnce();
   });
 });

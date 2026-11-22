@@ -128,5 +128,21 @@ describe('switchTabTool', () => {
       expect(result.isError).toBe(true);
       expect(chrome.tabs.query).not.toHaveBeenCalled();
     });
+
+    it('preserves "/" and trailing-slash specificity in substring matching', async () => {
+      (chrome.tabs.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+        makeTab({ id: 10, windowId: 1, url: 'https://example.com/form-admin', title: 'Admin', lastAccessed: 500 } as any),
+        makeTab({ id: 11, windowId: 1, url: 'https://example.com/form/', title: 'Form', lastAccessed: 100 } as any),
+      ]);
+
+      const slashForm = await switchTabTool.execute({ url: '/form/' });
+      expect(payloadOf(slashForm).tabId).toBe(11);
+      expect(payloadOf(slashForm).matchCount).toBeUndefined();
+      expect(payloadOf(slashForm).otherMatches).toBeUndefined();
+
+      const rootOnly = await switchTabTool.execute({ url: '/' });
+      expect(rootOnly.isError).toBe(false);
+      expect(payloadOf(rootOnly).matchCount).toBe(3);
+    });
   });
 });

@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   NETWORK_CAPTURE_LIMITS,
   boundCaptureResult,
+  canAttachBeforeNavigation,
+  fillMissingCaptureTabTitle,
   jsonByteLength,
   normalizeCaptureTimings,
   normalizeEventTime,
@@ -87,5 +89,35 @@ describe('network capture resource limits', () => {
     expect(jsonByteLength(result)).toBeLessThanOrEqual(NETWORK_CAPTURE_LIMITS.maxCaptureBytes);
     expect(normalizeEventTime(-1)).toBeUndefined();
     expect(normalizeEventTime(Number.POSITIVE_INFINITY)).toBeUndefined();
+  });
+
+  it('excludes extension stores from pre-navigation debugger attachment', () => {
+    expect(canAttachBeforeNavigation('https://example.com/')).toBe(true);
+    expect(canAttachBeforeNavigation('about:blank')).toBe(true);
+    expect(canAttachBeforeNavigation('chrome://newtab/')).toBe(false);
+    expect(canAttachBeforeNavigation('https://chromewebstore.google.com/detail/foo')).toBe(false);
+    expect(canAttachBeforeNavigation('https://chrome.google.com/webstore/detail/foo')).toBe(false);
+    expect(canAttachBeforeNavigation('https://microsoftedge.microsoft.com/addons/detail/foo')).toBe(
+      false,
+    );
+  });
+
+  it('fills missing tabTitle only from HTTP(S) tabs', async () => {
+    const originalTabs = (globalThis.chrome as any).tabs;
+    const tabsGet = vi.fn();
+    (globalThis.chrome as any).tabs = { ...originalTabs, get: tabsGet };
+    try {
+      tabsGet.mockResolvedValueOnce({ url: 'file:///tmp/secret.txt', title: 'Secret File' });
+      const nonPublic = { tabTitle: '' };
+      await fillMissingCaptureTabTitle(7, nonPublic);
+      expect(nonPublic.tabTitle).toBe('');
+
+      tabsGet.mockResolvedValueOnce({ url: 'https://example.com/', title: 'Public Title' });
+      const pub = { tabTitle: '' };
+      await fillMissingCaptureTabTitle(7, pub);
+      expect(pub.tabTitle).toBe('Public Title');
+    } finally {
+      (globalThis.chrome as any).tabs = originalTabs;
+    }
   });
 });

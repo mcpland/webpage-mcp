@@ -337,4 +337,51 @@ describe('keyboard-helper page protocol', () => {
       results: [{ keyCombination: 'Ctrl+A+B', success: false }],
     });
   });
+
+  it('skips deprecated keypress events for command chords like Ctrl+a', async () => {
+    const input = document.createElement('input');
+    input.value = 'abc';
+    document.body.append(input);
+    input.focus();
+    const types: string[] = [];
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+      input.addEventListener(type, () => types.push(type));
+    }
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: () => true,
+    });
+    const listener = executeHelper();
+    try {
+      const response = await sendKeys(listener, 'Ctrl+a');
+      expect(response.success).toBe(true);
+      expect(types).toEqual(['keydown', 'keyup']);
+    } finally {
+      Reflect.deleteProperty(document, 'execCommand');
+    }
+  });
+
+  it('tabs past decorative shadow hosts and from tabindex=-1 elements in document order', async () => {
+    document.body.innerHTML =
+      '<input id="first"><div id="deco"></div><div id="panel" tabindex="-1"></div><input id="second">';
+    const deco = document.getElementById('deco')!;
+    const root = deco.attachShadow({ mode: 'open' });
+    root.innerHTML = '<span>just text</span>';
+    const first = document.getElementById('first') as HTMLElement;
+    const panel = document.getElementById('panel') as HTMLElement;
+    const second = document.getElementById('second') as HTMLElement;
+    const listener = executeHelper();
+
+    first.focus();
+    expect((await sendKeys(listener, 'Tab')).success).toBe(true);
+    expect(document.activeElement).toBe(second);
+
+    panel.focus();
+    expect((await sendKeys(listener, 'Tab')).success).toBe(true);
+    expect(document.activeElement).toBe(second);
+
+    panel.focus();
+    expect((await sendKeys(listener, 'Shift+Tab')).success).toBe(true);
+    expect(document.activeElement).toBe(first);
+  });
 });

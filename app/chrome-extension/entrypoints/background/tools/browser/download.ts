@@ -37,13 +37,21 @@ function toPublicDownloadUrl(url?: string | null): { url?: string | null; urlRed
 class HandleDownloadTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD as any;
 
-  async execute(args: HandleDownloadParams): Promise<ToolResult> {
+  async execute(
+    args: HandleDownloadParams,
+    context?: { signal?: AbortSignal },
+  ): Promise<ToolResult> {
     const filenameContains = String(args?.filenameContains || '').trim();
     const waitForComplete = args?.waitForComplete !== false;
     const timeoutMs = Math.max(1000, Math.min(Number(args?.timeoutMs ?? 60000), 300000));
 
     try {
-      const result = await waitForDownload({ filenameContains, waitForComplete, timeoutMs });
+      const result = await waitForDownload({
+        filenameContains,
+        waitForComplete,
+        timeoutMs,
+        signal: context?.signal,
+      });
       return {
         content: [{ type: 'text', text: JSON.stringify({ success: true, download: result }) }],
         isError: false,
@@ -98,8 +106,10 @@ export function waitForDownload(opts: WaitForDownloadOptions): Promise<any> {
     let settled = false;
     // A specific in-progress download we are waiting to finish.
     let awaitedId: number | undefined;
-    // A new download can acquire its final matching filename in a later onChanged event.
-    const createdSinceArming = onlyNew ? new Set<number>() : undefined;
+    // Track downloads created after arming so onChanged can tell newly started
+    // downloads apart from stale historical items (e.g. deleted from disk).
+    const createdSinceArming = new Set<number>();
+    const lookbackStart = armedAt - RECENT_DOWNLOAD_LOOKBACK_MS;
 
     const cleanup = () => {
       if (timer) clearTimeout(timer);
@@ -156,8 +166,14 @@ export function waitForDownload(opts: WaitForDownloadOptions): Promise<any> {
         });
       }
     };
+    const isEligible = (item: chrome.downloads.DownloadItem) => {
+      if (createdSinceArming.has(item.id)) return true;
+      if (onlyNew) return false;
+      if (typeof awaitedId === 'number' && item.id === awaitedId) return true;
+      return (parseDownloadTimestamp(item.startTime) ?? 0) >= lookbackStart;
+    };
     const consider = (item: chrome.downloads.DownloadItem) => {
-      if (settled || !matches(item) || reportedDownloadIds.has(item.id)) return;
+      if (settled || !isEligible(item) || !matches(item) || reportedDownloadIds.has(item.id)) return;
       if (typeof awaitedId === 'number' && item.id !== awaitedId) return;
       if (!waitForComplete || isFinished(item)) {
         void fulfill(item);
@@ -167,14 +183,14 @@ export function waitForDownload(opts: WaitForDownloadOptions): Promise<any> {
     };
     const onCreated = (item: chrome.downloads.DownloadItem) => {
       try {
-        createdSinceArming?.add(item.id);
+        createdSinceArming.add(item.id);
         consider(item);
       } catch {}
     };
     const onChanged = (delta: chrome.downloads.DownloadDelta) => {
       try {
         if (!delta || typeof delta.id !== 'number') return;
-        if (createdSinceArming && !createdSinceArming.has(delta.id)) return;
+        if (onlyNew && !createdSinceArming.has(delta.id)) return;
         chrome.downloads
           .search({ id: delta.id })
           .then((arr) => {

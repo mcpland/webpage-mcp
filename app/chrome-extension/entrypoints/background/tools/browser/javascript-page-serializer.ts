@@ -42,9 +42,27 @@ export function serializeJavaScriptEvaluation(
     const MAX_VISITED_VALUES = 4096;
     const MAX_CHUNK_CHARS = 4096;
     const MAX_ENUMERATION_DURATION_MS = 100;
-    // Built without `**` or BigInt literals so syntax lowering can never
-    // introduce a bundle-scope helper into this page-serialized function.
-    const MAX_SERIALIZABLE_BIGINT = BigInt("1" + "0".repeat(4096));
+    // Computed lazily only when serializing a bigint, without `**` or
+    // String.prototype.repeat, so hostile pages that poison page intrinsics
+    // cannot break unrelated evaluations or bypass the BigInt bound.
+    let cachedMaxSerializableBigInt: bigint | null | undefined;
+    const getMaxSerializableBigInt = (): bigint | null => {
+      if (cachedMaxSerializableBigInt !== undefined) {
+        return cachedMaxSerializableBigInt;
+      }
+      try {
+        let zeros = "0";
+        for (let i = 0; i < 12; i += 1) {
+          zeros += zeros;
+        }
+        const limit = BigInt("1" + zeros);
+        cachedMaxSerializableBigInt =
+          typeof limit === "bigint" && limit > BigInt(0) ? limit : null;
+      } catch {
+        cachedMaxSerializableBigInt = null;
+      }
+      return cachedMaxSerializableBigInt;
+    };
 
     const requestedInteger =
       typeof requestedMaxOutputBytes === "number" &&
@@ -821,9 +839,11 @@ export function serializeJavaScriptEvaluation(
         return;
       }
       if (typeof value === "bigint") {
+        const maxBigInt = getMaxSerializableBigInt();
         if (
-          value >= MAX_SERIALIZABLE_BIGINT ||
-          value <= -MAX_SERIALIZABLE_BIGINT
+          maxBigInt === null ||
+          value >= maxBigInt ||
+          value <= -maxBigInt
         ) {
           markTruncated();
           writeJsonString("[BigInt exceeds serialization limit]");
@@ -1036,8 +1056,9 @@ export function serializeJavaScriptEvaluation(
       ) {
         message = `${error}`;
       } else if (typeof error === "bigint") {
+        const maxBigInt = getMaxSerializableBigInt();
         message =
-          error >= MAX_SERIALIZABLE_BIGINT || error <= -MAX_SERIALIZABLE_BIGINT
+          maxBigInt === null || error >= maxBigInt || error <= -maxBigInt
             ? "[BigInt error exceeds serialization limit]"
             : `${error}`;
       } else if (typeof error === "object" || typeof error === "function") {

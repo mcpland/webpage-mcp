@@ -189,7 +189,9 @@ export async function fillMissingCaptureTabTitle(
   if (data.tabTitle) return;
   try {
     const tab = await chrome.tabs.get(tabId);
-    if (tab?.title) data.tabTitle = truncateUtf8(tab.title, 1_024);
+    if (tab?.title && /^https?:\/\//i.test(String(tab.url || ''))) {
+      data.tabTitle = truncateUtf8(tab.title, 1_024);
+    }
   } catch {
     // The tab is gone; keep the empty title.
   }
@@ -200,7 +202,13 @@ export async function fillMissingCaptureTabTitle(
  * navigated elsewhere (chrome:// and similar pages refuse attachment).
  */
 export function canAttachBeforeNavigation(url: string | undefined): boolean {
-  return /^(https?:\/\/|about:blank(?:[?#]|$))/i.test(String(url || ''));
+  const value = String(url || '');
+  if (!/^(https?:\/\/|about:blank(?:[?#]|$))/i.test(value)) return false;
+  return (
+    !value.startsWith('https://chrome.google.com/webstore') &&
+    !value.startsWith('https://chromewebstore.google.com') &&
+    !value.startsWith('https://microsoftedge.microsoft.com/')
+  );
 }
 
 /**

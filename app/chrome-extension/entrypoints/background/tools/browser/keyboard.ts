@@ -7,6 +7,7 @@ import { hasDisallowedPublicUrlScheme } from './common';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { dispatchKeyStroke, parseKeyboardInput, type KeyboardStep } from '@/utils/cdp-keyboard';
 import {
+  CdpUnavailableError,
   PageUnresponsiveError,
   isTimeoutError,
   withTimeout,
@@ -47,19 +48,22 @@ export async function dispatchKeySequence(
   tabId: number,
   keys: string,
   delay: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   const steps = parseKeyboardInput(keys);
   const dispatch = (event: Record<string, unknown>) =>
     cdpSessionManager.sendCommand(tabId, 'Input.dispatchKeyEvent', event);
   for (let index = 0; index < steps.length; index += 1) {
+    if (signal?.aborted) return;
     const step = steps[index];
     if (step.kind === 'text') {
       await cdpSessionManager.sendCommand(tabId, 'Input.insertText', {
         text: step.text,
       });
     } else {
-      await dispatchKeyStroke(dispatch, step.stroke);
+      await dispatchKeyStroke(dispatch, step.stroke, { signal });
     }
+    if (signal?.aborted) return;
     if (delay > 0 && index < steps.length - 1) {
       await sleep(delay);
     }
@@ -76,9 +80,12 @@ export function pressKeysOnFocusedElement(
   keys: string,
   dialog?: DialogResponse,
 ): Promise<CdpInputResult> {
-  return runCdpInputWithDialogs(tabId, 'keyboard', () => dispatchKeySequence(tabId, keys, 0), {
-    dialog,
-  });
+  return runCdpInputWithDialogs(
+    tabId,
+    'keyboard',
+    (signal) => dispatchKeySequence(tabId, keys, 0, signal),
+    { dialog },
+  );
 }
 
 /**
@@ -181,8 +188,13 @@ class KeyboardTool extends BaseBrowserToolExecutor {
       let refForFocus = refTarget?.ref;
       let targetFrameId = refTarget ? refTarget.frameId : args.frameId;
 
-      // Ensure helper is loaded for XPath or potential focus operations
-      await this.injectAccessibilityHelper(targetTabId, targetFrameId);
+      // Ensure helper is loaded only when resolving a selector or focusing a ref.
+      // Composite selectors (`|>`) bridge from top frame into child iframes.
+      if (finalSelector || refForFocus) {
+        await this.injectAccessibilityHelper(targetTabId, targetFrameId, {
+          allFrames: isCompositeSelector(finalSelector),
+        });
+      }
 
       // Resolve any selector to a stable ref first so failures are explicit.
       if (finalSelector) {
@@ -255,15 +267,20 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         input = await runCdpInputWithDialogs(
           targetTabId,
           'keyboard',
-          () => dispatchKeySequence(targetTabId, keys, delay),
+          (signal) => dispatchKeySequence(targetTabId, keys, delay, signal),
           { dialog: dialogResponse },
         );
       } catch (cdpError) {
         if (cdpError instanceof PageUnresponsiveError) {
           return createErrorResponse(cdpError.message);
         }
+        if (!(cdpError instanceof CdpUnavailableError)) {
+          return createErrorResponse(
+            `CDP keyboard dispatch failed: ${cdpError instanceof Error ? cdpError.message : String(cdpError)}`,
+          );
+        }
         console.warn(
-          '[KeyboardTool] CDP keyboard dispatch failed, falling back to helper',
+          '[KeyboardTool] CDP keyboard dispatch unavailable, falling back to helper',
           cdpError,
         );
         return this.sendHelperSteps(

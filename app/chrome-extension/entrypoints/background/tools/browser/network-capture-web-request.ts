@@ -115,6 +115,7 @@ interface CaptureInfo {
 
 interface CompletedCapture {
   expiresAt: number;
+  rootTabId?: number;
   result: { success: boolean; message?: string; data?: any };
 }
 
@@ -138,6 +139,13 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
   private lastActivityTime: Map<number, number> = new Map(); // tabId -> timestamp of last activity
   private requestCounters: Map<number, number> = new Map(); // tabId -> count of captured requests
   private completedCaptures = new Map<number, CompletedCapture>();
+  private stoppingCaptures = new Map<
+    number,
+    {
+      promise: Promise<{ success: boolean; message?: string; data?: any }>;
+      markExplicitStop: () => void;
+    }
+  >();
   private pendingInheritedTabs = new Set<number>();
   public static MAX_REQUESTS_PER_CAPTURE = LIMITS.MAX_NETWORK_REQUESTS; // Maximum capture request count
   private listeners: NetworkCaptureListeners = {};
@@ -237,6 +245,9 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       try {
         // Wait a short time to ensure the tab is ready
         await new Promise((resolve) => setTimeout(resolve, 500));
+        if (this.captureData.get(openerTabId) !== openerCaptureInfo) {
+          return;
+        }
         const remainingMs = openerCaptureInfo.deadlineAt - Date.now();
         if (
           remainingMs < NETWORK_CAPTURE_LIMITS.minCaptureTimeMs ||
@@ -420,6 +431,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
   private cacheCompletedCapture(
     tabId: number,
     result: { success: boolean; message?: string; data?: any },
+    rootTabId?: number,
   ): void {
     this.pruneCompletedCaptures();
     while (this.completedCaptures.size >= NETWORK_CAPTURE_LIMITS.maxCompletedResults) {
@@ -429,17 +441,49 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
     }
     this.completedCaptures.set(tabId, {
       expiresAt: Date.now() + NETWORK_CAPTURE_LIMITS.completedResultTtlMs,
+      rootTabId,
       result,
     });
   }
 
   public getAvailableTabIds(): number[] {
     this.pruneCompletedCaptures();
-    return Array.from(new Set([...this.captureData.keys(), ...this.completedCaptures.keys()]));
+    return Array.from(
+      new Set([
+        ...this.captureData.keys(),
+        ...this.stoppingCaptures.keys(),
+        ...this.completedCaptures.keys(),
+      ]),
+    );
   }
 
   public hasAvailableCapture(): boolean {
     return this.getAvailableTabIds().length > 0;
+  }
+
+  public async stopLineageCaptures(rootTabId: number): Promise<void> {
+    this.pruneCompletedCaptures();
+    const childTabIds: number[] = [];
+    for (const [tabId, info] of this.captureData) {
+      if (tabId !== rootTabId && info?.rootTabId === rootTabId) {
+        childTabIds.push(tabId);
+      }
+    }
+    for (const [tabId, completed] of this.completedCaptures) {
+      if (tabId !== rootTabId && completed.rootTabId === rootTabId) {
+        this.completedCaptures.delete(tabId);
+      }
+    }
+    for (const childTabId of childTabIds) {
+      try {
+        await this.stopCapture(childTabId);
+      } catch (error) {
+        console.warn(
+          `NetworkCaptureV2: Error stopping inherited capture for tab ${childTabId}:`,
+          error,
+        );
+      }
+    }
   }
 
   /**
@@ -749,8 +793,8 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
     const inactivityTimeout = Math.min(options.inactivityTimeout, maxCaptureTime);
     const { includeStatic } = options;
 
-    // If already capturing, stop first
-    if (this.captureData.has(tabId)) {
+    // If already capturing or stopping, finish stopping first
+    if (this.captureData.has(tabId) || this.stoppingCaptures.has(tabId)) {
       console.log(
         `NetworkCaptureV2: Already capturing on tab ${tabId}. Stopping previous session.`,
       );
@@ -826,6 +870,18 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
     isAutoStop = false,
     stoppedBy = isAutoStop ? 'automatic' : 'user_request',
   ): Promise<{ success: boolean; message?: string; data?: any }> {
+    const inFlight = this.stoppingCaptures.get(tabId);
+    if (inFlight) {
+      if (!isAutoStop) {
+        inFlight.markExplicitStop();
+      }
+      const result = await inFlight.promise;
+      if (!isAutoStop) {
+        this.completedCaptures.delete(tabId);
+      }
+      return result;
+    }
+
     const captureInfo = this.captureData.get(tabId);
     if (!captureInfo) {
       this.pruneCompletedCaptures();
@@ -838,90 +894,106 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       return { success: false, message: `No capture in progress for tab ${tabId}` };
     }
 
-    try {
-      // Record end time
-      captureInfo.endTime = Date.now();
+    const totalRequestsReceived = this.requestCounters.get(tabId) || 0;
+    this.cleanupCapture(tabId);
 
-      // Extract common request and response headers
-      const requestsArray = Object.values(captureInfo.requests ?? {});
-      const commonRequestHeaders = this.analyzeCommonHeaders(requestsArray, 'requestHeaders');
-      const commonResponseHeaders = this.analyzeCommonHeaders(requestsArray, 'responseHeaders');
+    let explicitStopJoined = !isAutoStop;
+    const stopPromise = (async () => {
+      try {
+        // Record end time
+        captureInfo.endTime = Date.now();
 
-      // Process request data, remove common headers
-      const processedRequests = requestsArray.map((req) => {
-        const finalReq: NetworkRequestInfo = { ...req };
+        // Extract common request and response headers
+        const requestsArray = Object.values(captureInfo.requests ?? {});
+        const commonRequestHeaders = this.analyzeCommonHeaders(requestsArray, 'requestHeaders');
+        const commonResponseHeaders = this.analyzeCommonHeaders(requestsArray, 'responseHeaders');
 
-        if (finalReq.requestHeaders) {
-          finalReq.specificRequestHeaders = this.filterOutCommonHeaders(
-            finalReq.requestHeaders,
-            commonRequestHeaders,
-          );
-          delete finalReq.requestHeaders;
-        } else {
-          finalReq.specificRequestHeaders = {};
+        // Process request data, remove common headers
+        const processedRequests = requestsArray.map((req) => {
+          const finalReq: NetworkRequestInfo = { ...req };
+
+          if (finalReq.requestHeaders) {
+            finalReq.specificRequestHeaders = this.filterOutCommonHeaders(
+              finalReq.requestHeaders,
+              commonRequestHeaders,
+            );
+            delete finalReq.requestHeaders;
+          } else {
+            finalReq.specificRequestHeaders = {};
+          }
+
+          if (finalReq.responseHeaders) {
+            finalReq.specificResponseHeaders = this.filterOutCommonHeaders(
+              finalReq.responseHeaders,
+              commonResponseHeaders,
+            );
+            delete finalReq.responseHeaders;
+          } else {
+            finalReq.specificResponseHeaders = {};
+          }
+
+          return finalReq;
+        });
+
+        // Sort by time
+        processedRequests.sort((a, b) => (a.requestTime || 0) - (b.requestTime || 0));
+
+        // Prepare result data
+        const resultData = boundCaptureResult({
+          captureStartTime: captureInfo.startTime,
+          captureEndTime: captureInfo.endTime,
+          totalDurationMs: Math.max(0, captureInfo.endTime - captureInfo.startTime),
+          settingsUsed: {
+            maxCaptureTime: captureInfo.maxCaptureTime,
+            inactivityTimeout: captureInfo.inactivityTimeout,
+            includeStatic: captureInfo.includeStatic,
+            maxRequests: NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE,
+          },
+          commonRequestHeaders,
+          commonResponseHeaders,
+          requests: processedRequests,
+          requestCount: processedRequests.length,
+          totalRequestsReceived,
+          requestLimitReached: captureInfo.limitReached || false,
+          byteLimitReached: captureInfo.byteLimitReached || false,
+          stoppedBy,
+          tabUrl: truncateUtf8(captureInfo.tabUrl, NETWORK_CAPTURE_LIMITS.maxUrlBytes),
+          tabTitle: truncateUtf8(captureInfo.tabTitle, 1_024),
+        });
+
+        await fillMissingCaptureTabTitle(tabId, resultData);
+
+        const result = {
+          success: true,
+          data: resultData,
+        };
+        if (isAutoStop && !explicitStopJoined) {
+          this.cacheCompletedCapture(tabId, result, captureInfo.rootTabId);
         }
+        return result;
+      } catch (error: any) {
+        console.error(`NetworkCaptureV2: Error stopping capture for tab ${tabId}:`, error);
 
-        if (finalReq.responseHeaders) {
-          finalReq.specificResponseHeaders = this.filterOutCommonHeaders(
-            finalReq.responseHeaders,
-            commonResponseHeaders,
-          );
-          delete finalReq.responseHeaders;
-        } else {
-          finalReq.specificResponseHeaders = {};
-        }
-
-        return finalReq;
-      });
-
-      // Sort by time
-      processedRequests.sort((a, b) => (a.requestTime || 0) - (b.requestTime || 0));
-
-      // Prepare result data
-      const resultData = boundCaptureResult({
-        captureStartTime: captureInfo.startTime,
-        captureEndTime: captureInfo.endTime,
-        totalDurationMs: Math.max(0, captureInfo.endTime - captureInfo.startTime),
-        settingsUsed: {
-          maxCaptureTime: captureInfo.maxCaptureTime,
-          inactivityTimeout: captureInfo.inactivityTimeout,
-          includeStatic: captureInfo.includeStatic,
-          maxRequests: NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE,
-        },
-        commonRequestHeaders,
-        commonResponseHeaders,
-        requests: processedRequests,
-        requestCount: processedRequests.length,
-        totalRequestsReceived: this.requestCounters.get(tabId) || 0,
-        requestLimitReached: captureInfo.limitReached || false,
-        byteLimitReached: captureInfo.byteLimitReached || false,
-        stoppedBy,
-        tabUrl: truncateUtf8(captureInfo.tabUrl, NETWORK_CAPTURE_LIMITS.maxUrlBytes),
-        tabTitle: truncateUtf8(captureInfo.tabTitle, 1_024),
-      });
-
-      // Clean up resources
-      this.cleanupCapture(tabId);
-
-      const result = {
-        success: true,
-        data: resultData,
-      };
-      if (isAutoStop) {
-        this.cacheCompletedCapture(tabId, result);
+        return {
+          success: false,
+          message: `Error stopping capture: ${error.message || String(error)}`,
+        };
       }
-      await fillMissingCaptureTabTitle(tabId, resultData);
-      return result;
-    } catch (error: any) {
-      console.error(`NetworkCaptureV2: Error stopping capture for tab ${tabId}:`, error);
+    })();
 
-      // Ensure resources are cleaned up
-      this.cleanupCapture(tabId);
-
-      return {
-        success: false,
-        message: `Error stopping capture: ${error.message || String(error)}`,
-      };
+    const entry = {
+      promise: stopPromise,
+      markExplicitStop: () => {
+        explicitStopJoined = true;
+      },
+    };
+    this.stoppingCaptures.set(tabId, entry);
+    try {
+      return await stopPromise;
+    } finally {
+      if (this.stoppingCaptures.get(tabId) === entry) {
+        this.stoppingCaptures.delete(tabId);
+      }
     }
   }
 
@@ -1000,6 +1072,8 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
     }
 
 
+    let blankRecovery: { tabId: number; url: string } | undefined;
+
     try {
       const explicitTab = await this.tryGetTab(targetTabId);
       // Get current tab or create new tab
@@ -1008,8 +1082,6 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       // The page at targetUrl is loaded only once the capture is listening;
       // loading it first lost its earliest requests, often the ones that matter.
       let loadAfterStart: string | undefined;
-      // Set when this call opened the tab blank, so a failed start can still load the page.
-      let createdBlankTab = false;
 
       if (targetUrl) {
         if (explicitTab?.id) {
@@ -1030,7 +1102,9 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
               active: background !== true,
               windowId,
             });
-            createdBlankTab = true;
+            if (tabToOperateOn.id) {
+              blankRecovery = { tabId: tabToOperateOn.id, url: targetUrl };
+            }
             loadAfterStart = targetUrl;
           }
         }
@@ -1069,9 +1143,6 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
           pageUrl: loadAfterStart,
         });
       } catch (error: any) {
-        if (createdBlankTab && loadAfterStart) {
-          await loadIfStillBlank(tabToOperateOn.id, loadAfterStart);
-        }
         return createErrorResponse(
           `Failed to start capture for tab ${tabToOperateOn.id}: ${error.message || String(error)}`,
         );
@@ -1080,7 +1151,9 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       if (loadAfterStart) {
         try {
           await chrome.tabs.update(tabToOperateOn.id, { url: loadAfterStart });
+          blankRecovery = undefined;
         } catch (error: any) {
+          blankRecovery = undefined;
           await this.stopCapture(tabToOperateOn.id);
           return createErrorResponse(
             `Failed to load the URL in tab ${tabToOperateOn.id}: ${error.message || String(error)}`,
@@ -1111,6 +1184,10 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       return createErrorResponse(
         `Error in NetworkCaptureStartTool: ${error.message || String(error)}`,
       );
+    } finally {
+      if (blankRecovery) {
+        await loadIfStillBlank(blankRecovery.tabId, blankRecovery.url);
+      }
     }
   }
 }

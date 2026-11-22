@@ -927,4 +927,78 @@ describe('navigateTool', () => {
     );
     expect(mocks.tabsGoBack).toHaveBeenCalledWith(7);
   });
+
+  it('includes loadState status and warnings for openMode=new_window', async () => {
+    vi.useFakeTimers();
+    mocks.windowsCreate.mockResolvedValueOnce({
+      id: 30,
+      tabs: [makeTab({ id: 101, windowId: 30, url: 'https://example.com/slow', status: 'loading' })],
+    });
+    mocks.tabsGet.mockResolvedValue(
+      makeTab({ id: 101, windowId: 30, url: 'https://example.com/slow', status: 'loading' }),
+    );
+
+    const pending = navigateTool.execute({
+      url: 'https://example.com/slow',
+      openMode: 'new_window',
+      background: true,
+    });
+    await vi.advanceTimersByTimeAsync(21_000);
+    const payload = getTextPayload(await pending);
+    vi.useRealTimers();
+
+    expect(payload.status).toBe('loading');
+    expect((payload as { warnings?: string[] }).warnings?.[0]).toContain('still loading');
+  });
+
+  it('waits for same-URL current_tab navigation to finish reloading', async () => {
+    let polls = 0;
+    mocks.tabsGet.mockImplementation(async (tabId: number) => {
+      polls += 1;
+      return makeTab({
+        id: tabId,
+        windowId: 31,
+        url: 'https://example.com/same',
+        // First read resolves target; next two polls show reload in progress.
+        status: polls === 1 || polls > 3 ? 'complete' : 'loading',
+      });
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://example.com/same',
+      tabId: 7,
+      openMode: 'current_tab',
+      background: true,
+    });
+    const payload = getTextPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(polls).toBeGreaterThan(3);
+    expect(payload).toMatchObject({ url: 'https://example.com/same', status: 'complete' });
+  });
+
+  it('waits for history goBack URL change even when waitUntil is commit', async () => {
+    let polls = 0;
+    mocks.tabsQuery.mockResolvedValueOnce([
+      makeTab({ id: 7, windowId: 20, url: 'https://example.com/page-2' }),
+    ]);
+    mocks.tabsGet.mockImplementation(async (tabId: number) => {
+      polls += 1;
+      return makeTab({
+        id: tabId,
+        windowId: 20,
+        url: polls <= 2 ? 'https://example.com/page-2' : 'https://example.com/page-1',
+        status: polls <= 2 ? 'loading' : 'complete',
+      });
+    });
+
+    const result = await navigateTool.execute({
+      url: 'back',
+      waitUntil: 'commit',
+    });
+    const payload = getTextPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(payload.url).toBe('https://example.com/page-1');
+  });
 });

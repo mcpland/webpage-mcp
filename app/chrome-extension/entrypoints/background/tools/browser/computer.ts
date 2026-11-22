@@ -16,6 +16,7 @@ import {
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { dispatchKeyStroke, parseKeyboardInput, parseKeySequence, type KeyboardStep } from '@/utils/cdp-keyboard';
 import {
+  CdpUnavailableError,
   PageUnresponsiveError,
   pendingDialogHint,
   runCdpInputWithDialogs,
@@ -331,8 +332,10 @@ class ComputerTool extends BaseBrowserToolExecutor {
       return { x: scaled.x, y: scaled.y };
     };
 
-    const injectAccessibilityHelper = (frameId?: number): Promise<void> =>
-      this.injectAccessibilityHelper(tab.id!, frameId);
+    const injectAccessibilityHelper = (
+      frameId?: number,
+      options?: { allFrames?: boolean },
+    ): Promise<void> => this.injectAccessibilityHelper(tab.id!, frameId, options);
 
     const resolveRefPoint = async (
       ref: string,
@@ -366,7 +369,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
     > => {
       const normalizedSelector = normalizeBrowserTargetSelector(selector, selectorType);
       if (!normalizedSelector) return undefined;
-      await injectAccessibilityHelper(requestedFrameId);
+      await injectAccessibilityHelper(requestedFrameId, {
+        allFrames: isCompositeSelector(normalizedSelector),
+      });
       const selectorFrameId = isCompositeSelector(normalizedSelector)
         ? undefined
         : requestedFrameId;
@@ -592,8 +597,13 @@ class ComputerTool extends BaseBrowserToolExecutor {
           };
         } catch (error) {
           if (error instanceof PageUnresponsiveError) return createErrorResponse(error.message);
+          if (!(error instanceof CdpUnavailableError)) {
+            return createErrorResponse(
+              `CDP hover failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
           console.warn(
-            '[ComputerTool] CDP hover failed, attempting DOM fallback',
+            '[ComputerTool] CDP hover unavailable, attempting DOM fallback',
             error,
           );
           return await this.domHoverFallback(
@@ -601,21 +611,12 @@ class ComputerTool extends BaseBrowserToolExecutor {
             coord,
             resolvedBy,
             params.ref,
+            params.frameId,
           );
         }
       }
       case 'left_click':
       case 'right_click': {
-        // Calculate CDP modifier mask for click events
-        const modifiersMask = CDPHelper.modifierMask(
-          [
-            params.modifiers?.altKey ? 'alt' : undefined,
-            params.modifiers?.ctrlKey ? 'ctrl' : undefined,
-            params.modifiers?.metaKey ? 'meta' : undefined,
-            params.modifiers?.shiftKey ? 'shift' : undefined,
-          ].filter((v): v is string => typeof v === 'string'),
-        );
-
         if (params.ref) {
           // Prefer DOM click via ref
           const domResult = await clickTool.execute({
@@ -629,7 +630,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
             windowId: tab.windowId,
             background: params.background === true,
             dialog: dialogResponse,
-            waitForDownload: (params as any).waitForDownload,          });
+            waitForDownload: (params as any).waitForDownload,
+          });
           return domResult;
         }
         if (params.selector) {
@@ -646,7 +648,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
             windowId: tab.windowId,
             background: params.background === true,
             dialog: dialogResponse,
-            waitForDownload: (params as any).waitForDownload,          });
+            waitForDownload: (params as any).waitForDownload,
+          });
           return domResult;
         }
         if (!params.coordinates)
@@ -677,8 +680,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
           if (stale) return stale;
         }
         const coord = project(params.coordinates)!;
-        // Prefer DOM path via existing click tool
-        const domResult = await clickTool.execute({
+        // clickTool already tries CDP first, falls back to DOM helper, and validates waitForDownload.
+        return clickTool.execute({
           coordinates: coord,
           waitForNavigation: false,
           timeout: TIMEOUTS.DEFAULT_WAIT * 5,
@@ -688,74 +691,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
           windowId: tab.windowId,
           background: params.background === true,
           dialog: dialogResponse,
-          waitForDownload: (params as any).waitForDownload,        });
-        if (!domResult.isError) {
-          return domResult; // Standardized response from click tool
-        }
-        // Fallback to CDP if DOM failed
-        try {
-          const input = await runCdpInputWithDialogs(
-            tab.id!,
-            'computer',
-            async () => {
-              const button: MouseButton =
-                params.action === 'right_click' ? 'right' : 'left';
-              const clickCount = 1;
-              await CDPHelper.dispatchMouseEvent(tab.id!, {
-                type: 'mouseMoved',
-                x: coord.x,
-                y: coord.y,
-                button: 'none',
-                buttons: 0,
-                modifiers: modifiersMask,
-              });
-              for (let i = 1; i <= clickCount; i++) {
-                await CDPHelper.dispatchMouseEvent(tab.id!, {
-                  type: 'mousePressed',
-                  x: coord.x,
-                  y: coord.y,
-                  button,
-                  buttons: button === 'left' ? 1 : 2,
-                  clickCount: i,
-                  modifiers: modifiersMask,
-                });
-                await CDPHelper.dispatchMouseEvent(tab.id!, {
-                  type: 'mouseReleased',
-                  x: coord.x,
-                  y: coord.y,
-                  button,
-                  buttons: 0,
-                  clickCount: i,
-                  modifiers: modifiersMask,
-                });
-              }
-            },
-            { dialog: dialogResponse, graceMs: 150 },
-          );
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(
-                  withDialogOutcome(
-                    {
-                      success: true,
-                      action: params.action,
-                      coordinates: coord,
-                    },
-                    input,
-                  ),
-                ),
-              },
-            ],
-            isError: false,
-          };
-        } catch (e) {
-          if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
-          return createErrorResponse(
-            `CDP click failed: ${e instanceof Error ? e.message : String(e)}`,
-          );
-        }
+          waitForDownload: (params as any).waitForDownload,
+        });
       }
       case 'double_click':
       case 'triple_click': {
@@ -776,13 +713,28 @@ class ComputerTool extends BaseBrowserToolExecutor {
         let coord = params.coordinates
           ? project(params.coordinates)!
           : (undefined as any);
-        // If ref is provided, resolve center via accessibility helper
+        // If ref is provided, scroll it into view and resolve its center explicitly.
         if (params.ref) {
           try {
-            coord =
-              (await resolveRefPoint(params.ref, params.frameId)) || coord;
+            const target = resolveRefTarget(params.ref, params.frameId);
+            await injectAccessibilityHelper(target?.frameId);
+            try {
+              await this.sendMessageToTab(
+                tab.id,
+                { action: 'focusByRef', ref: target?.ref },
+                target?.frameId,
+              );
+            } catch {
+              // Best effort - continue even if scroll fails
+            }
+            coord = await resolveRefPoint(params.ref, params.frameId);
           } catch (e) {
-            // ignore and use provided coordinates
+            return createErrorResponse(
+              `Failed to resolve ref "${params.ref}": ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+          if (!coord) {
+            return createErrorResponse(`Failed to resolve coordinates from ref "${params.ref}"`);
           }
         } else if (params.selector) {
           // Support selector-based click
@@ -792,11 +744,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
               params.selectorType || 'css',
               params.frameId,
             );
-            if (selectorResolution) {
-              coord = selectorResolution.point;
-            }
+            coord = selectorResolution?.point;
           } catch (e) {
-            // ignore
+            return createErrorResponse(
+              `Failed to resolve selector "${params.selector}": ${e instanceof Error ? e.message : String(e)}`,
+            );
           }
         }
         if (!coord)
@@ -805,7 +757,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           );
         {
           const stale = ((): any => {
-            if (!params.coordinates) return null;
+            if (!params.coordinates || params.ref || params.selector) return null;
             const getHostname = (url: string): string => {
               try {
                 return new URL(url).hostname;
@@ -831,9 +783,10 @@ class ComputerTool extends BaseBrowserToolExecutor {
           const input = await runCdpInputWithDialogs(
             tab.id!,
             'computer',
-            async () => {
+            async (signal) => {
               const button: MouseButton = 'left';
               const clickCount = params.action === 'double_click' ? 2 : 3;
+              if (signal.aborted) return;
               await CDPHelper.dispatchMouseEvent(tab.id!, {
                 type: 'mouseMoved',
                 x: coord.x,
@@ -843,6 +796,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
                 modifiers: modifiersMask,
               });
               for (let i = 1; i <= clickCount; i++) {
+                if (signal.aborted) return;
                 await CDPHelper.dispatchMouseEvent(tab.id!, {
                   type: 'mousePressed',
                   x: coord.x,
@@ -852,6 +806,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
                   clickCount: i,
                   modifiers: modifiersMask,
                 });
+                if (signal.aborted) return;
                 await CDPHelper.dispatchMouseEvent(tab.id!, {
                   type: 'mouseReleased',
                   x: coord.x,
@@ -927,22 +882,28 @@ class ComputerTool extends BaseBrowserToolExecutor {
           })();
           if (stale) return stale;
         }
-        if (params.startRef || params.ref) {
-          await injectAccessibilityHelper(params.frameId);
-        }
         if (params.startRef) {
           try {
-            start =
-              (await resolveRefPoint(params.startRef, params.frameId)) || start;
-          } catch {
-            // ignore
+            start = await resolveRefPoint(params.startRef, params.frameId);
+          } catch (e) {
+            return createErrorResponse(
+              `Failed to resolve startRef "${params.startRef}": ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+          if (!start) {
+            return createErrorResponse(`Failed to resolve coordinates from startRef "${params.startRef}"`);
           }
         }
         if (params.ref) {
           try {
-            end = (await resolveRefPoint(params.ref, params.frameId)) || end;
-          } catch {
-            // ignore
+            end = await resolveRefPoint(params.ref, params.frameId);
+          } catch (e) {
+            return createErrorResponse(
+              `Failed to resolve ref "${params.ref}": ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+          if (!end) {
+            return createErrorResponse(`Failed to resolve coordinates from ref "${params.ref}"`);
           }
         }
         if (!start || !end)
@@ -951,7 +912,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
           const input = await runCdpInputWithDialogs(
             tab.id!,
             'computer',
-            async () => {
+            async (signal) => {
+              if (signal.aborted) return;
               await CDPHelper.dispatchMouseEvent(tab.id!, {
                 type: 'mouseMoved',
                 x: start.x,
@@ -959,6 +921,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
                 button: 'none',
                 buttons: 0,
               });
+              if (signal.aborted) return;
               await CDPHelper.dispatchMouseEvent(tab.id!, {
                 type: 'mousePressed',
                 x: start.x,
@@ -967,6 +930,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
                 buttons: 1,
                 clickCount: 1,
               });
+              if (signal.aborted) return;
               await CDPHelper.dispatchMouseEvent(tab.id!, {
                 type: 'mouseMoved',
                 x: end.x,
@@ -974,6 +938,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
                 button: 'left',
                 buttons: 1,
               });
+              if (signal.aborted) return;
               await CDPHelper.dispatchMouseEvent(tab.id!, {
                 type: 'mouseReleased',
                 x: end.x,
@@ -1015,32 +980,29 @@ class ComputerTool extends BaseBrowserToolExecutor {
         let coord = params.coordinates
           ? project(params.coordinates)!
           : (undefined as any);
+        const needViewportCenter = !params.ref && !params.coordinates;
         if (params.ref) {
           try {
-            coord =
-              (await resolveRefPoint(params.ref, params.frameId)) || coord;
-          } catch {
-            // ignore
-          }
-        } else if (!params.coordinates) {
-          // "Scroll down" needs no target: wheel at the viewport center.
-          try {
-            const metrics: any = await CDPHelper.send(tab.id, 'Page.getLayoutMetrics', {});
-            const viewport = metrics?.cssLayoutViewport || metrics?.layoutViewport;
-            const width = Number(viewport?.clientWidth);
-            const height = Number(viewport?.clientHeight);
-            if (width > 0 && height > 0) {
-              coord = { x: Math.round(width / 2), y: Math.round(height / 2) };
+            const resolved = await resolveRefPoint(params.ref, params.frameId);
+            if (!resolved) {
+              return createErrorResponse(
+                `Failed to resolve ref ${params.ref} for scroll`,
+              );
             }
-          } catch {
-            // fall through to the error below
+            coord = resolved;
+          } catch (e) {
+            return createErrorResponse(
+              `Failed to resolve ref ${params.ref} for scroll: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            );
           }
         }
-        if (!coord)
+        if (!coord && !needViewportCenter)
           return createErrorResponse('Failed to resolve scroll coordinates');
         {
           const stale = ((): any => {
-            if (!params.coordinates) return null;
+            if (!params.coordinates || params.ref) return null;
             const getHostname = (url: string): string => {
               try {
                 return new URL(url).hostname;
@@ -1076,7 +1038,25 @@ class ComputerTool extends BaseBrowserToolExecutor {
           const input = await runCdpInputWithDialogs(
             tab.id!,
             'computer',
-            async () => {
+            async (signal) => {
+              if (needViewportCenter) {
+                // "Scroll down" needs no target: wheel at the viewport center.
+                const metrics: any = await CDPHelper.send(
+                  tab.id!,
+                  'Page.getLayoutMetrics',
+                  {},
+                );
+                if (signal.aborted) return;
+                const viewport =
+                  metrics?.cssLayoutViewport || metrics?.layoutViewport;
+                const width = Number(viewport?.clientWidth);
+                const height = Number(viewport?.clientHeight);
+                if (!(width > 0 && height > 0)) {
+                  throw new Error('Failed to resolve scroll coordinates');
+                }
+                coord = { x: Math.round(width / 2), y: Math.round(height / 2) };
+              }
+              if (signal.aborted) return;
               await CDPHelper.dispatchMouseEvent(tab.id!, {
                 type: 'mouseWheel',
                 x: coord.x,
@@ -1144,13 +1124,16 @@ class ComputerTool extends BaseBrowserToolExecutor {
           const input = await runCdpInputWithDialogs(
             tab.id!,
             'computer',
-            async () => {
+            async (signal) => {
+              if (signal.aborted) return;
               if (params.clear === true) {
-                await dispatchKeySequence(tab.id!, CLEAR_FIELD_KEYS, 0);
+                await dispatchKeySequence(tab.id!, CLEAR_FIELD_KEYS, 0, signal);
               }
+              if (signal.aborted) return;
               // Use CDP insertText to avoid complex KeyboardEvent emulation for long text
               if (text) await CDPHelper.insertText(tab.id!, text);
-              if (submit) await dispatchKeySequence(tab.id!, 'Enter', 0);
+              if (signal.aborted) return;
+              if (submit) await dispatchKeySequence(tab.id!, 'Enter', 0, signal);
             },
             // Typing alone opens no dialogs; Enter may (confirm on submit).
             { dialog: dialogResponse, ...(submit ? {} : { graceMs: 0 }) },
@@ -1177,6 +1160,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
           };
         } catch (e) {
           if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
+          if (!(e instanceof CdpUnavailableError)) {
+            return createErrorResponse(
+              `CDP type failed: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
           const steps: KeyboardStep[] = [];
           if (params.clear) steps.push(...parseKeyboardInput(CLEAR_FIELD_KEYS));
           if (params.text) steps.push({ kind: 'text', text: params.text });
@@ -1270,10 +1258,32 @@ class ComputerTool extends BaseBrowserToolExecutor {
           if (successCount !== results.length) {
             submitError = 'not submitted because some fields could not be filled';
           } else {
+            const lastItem = elements[elements.length - 1];
+            let lastFrameId = params.frameId;
+            if (lastItem?.ref) {
+              try {
+                lastFrameId = resolveRefTarget(lastItem.ref, params.frameId)?.frameId ?? params.frameId;
+              } catch {
+                // Keep params.frameId if ref parsing fails.
+              }
+            }
             try {
               submitInput = await pressKeysOnFocusedElement(tab.id!, 'Enter', dialogResponse);
             } catch (e) {
-              submitError = `pressing Enter to submit failed: ${e instanceof Error ? e.message : String(e)}`;
+              if (e instanceof CdpUnavailableError && !dialogResponse) {
+                const fallback = await keyboardTool.sendHelperSteps(
+                  tab.id!,
+                  'Enter',
+                  parseKeyboardInput('Enter'),
+                  0,
+                  { frameId: lastFrameId },
+                );
+                if (fallback.isError) {
+                  submitError = `pressing Enter to submit failed: ${firstResultText(fallback) || 'submit failed'}`;
+                }
+              } else {
+                submitError = `pressing Enter to submit failed: ${e instanceof Error ? e.message : String(e)}`;
+              }
             }
           }
         }
@@ -1312,6 +1322,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
               'Use named keys (Enter, Tab, Backspace, ArrowLeft, F5, ...), single characters, or chords such as "cmd+a"; use action="type" to enter text.',
           );
         }
+        if (strokes.length === 0) {
+          return createErrorResponse(
+            'text is required for key action (e.g., "Backspace Backspace Enter" or "cmd+a")',
+          );
+        }
         const tokens = params.text.trim().split(/\s+/).filter(Boolean);
         const repeat = params.repeat ?? 1;
         if (!Number.isInteger(repeat) || repeat < 1 || repeat > 100) {
@@ -1340,12 +1355,13 @@ class ComputerTool extends BaseBrowserToolExecutor {
           const input = await runCdpInputWithDialogs(
             tab.id!,
             'computer',
-            async () => {
+            async (signal) => {
               const dispatch = (event: Record<string, unknown>) =>
                 CDPHelper.send(tab.id!, 'Input.dispatchKeyEvent', event);
               for (let i = 0; i < repeat; i++) {
                 for (const stroke of strokes) {
-                  await dispatchKeyStroke(dispatch, stroke);
+                  if (signal.aborted) return;
+                  await dispatchKeyStroke(dispatch, stroke, { signal });
                 }
               }
             },
@@ -1372,6 +1388,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
           };
         } catch (e) {
           if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
+          if (!(e instanceof CdpUnavailableError)) {
+            return createErrorResponse(
+              `CDP key dispatch failed: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
           const sequence: KeyboardStep[] = strokes.map((stroke, i) => ({
             kind: 'stroke', stroke, token: tokens[i],
           }));
@@ -1648,11 +1669,13 @@ class ComputerTool extends BaseBrowserToolExecutor {
     coord?: Coordinates,
     resolvedBy?: 'ref' | 'selector' | 'coordinates',
     ref?: string,
+    frameId?: number,
   ): Promise<ToolResult> {
     // Try ref-based approach first (handles iframes correctly)
     if (ref) {
       try {
-        const target = resolveRefTarget(ref);
+        const target = resolveRefTarget(ref, frameId);
+        await this.injectAccessibilityHelper(tabId, target?.frameId);
         const resp = await this.sendMessageToTab(
           tabId,
           {

@@ -53,6 +53,50 @@ test("rejects a serializer that depends on a bundle-scope helper", async (t) => 
   );
 });
 
+test("catches bundle-scope helpers in unexercised serializer branches statically", async (t) => {
+  const branchLeak = SELF_CONTAINED_SERIALIZER.replace(
+    "if (s === 0)",
+    "if (s === 999) return bundleHelper(v);\n    if (s === 0)",
+  );
+  const bundleDir = fixture(
+    `function bundleHelper(x) { return x; }\n${branchLeak}\nconst B_ = I_.toString();`,
+  );
+  t.after(() => fs.rmSync(bundleDir, { recursive: true, force: true }));
+  await assert.rejects(
+    verifyPageFunctions({ bundleDir }),
+    /static free-variable check.*bundleHelper/,
+  );
+});
+
+test("rejects executeScript({ func }) callbacks that reference bundle-scope helpers", async (t) => {
+  const bundleDir = fixture(
+    [
+      SELF_CONTAINED_SERIALIZER,
+      "function helper(x) { return x + 1; }",
+      "chrome.scripting.executeScript({ target: { tabId: 1 }, func: (v) => helper(v) + document.title.length, args: [1] });",
+    ].join("\n"),
+  );
+  t.after(() => fs.rmSync(bundleDir, { recursive: true, force: true }));
+  await assert.rejects(
+    verifyPageFunctions({ bundleDir }),
+    /executeScript func is not self-contained.*helper/s,
+  );
+});
+
+test("accepts self-contained executeScript({ func }) callbacks using browser globals", async (t) => {
+  const bundleDir = fixture(
+    [
+      SELF_CONTAINED_SERIALIZER,
+      "function pageProbe(sel) { const el = document.querySelector(sel); return el ? el.getBoundingClientRect().width : 0; }",
+      "chrome.scripting.executeScript({ target: { tabId: 1 }, func: pageProbe, args: ['#app'] });",
+      "chrome.scripting.executeScript({ target: { tabId: 1 }, func: () => window.scrollY + document.body.children.length });",
+    ].join("\n"),
+  );
+  t.after(() => fs.rmSync(bundleDir, { recursive: true, force: true }));
+  const summary = await verifyPageFunctions({ bundleDir });
+  assert.equal(summary.functions, 3);
+});
+
 test("fails when the serializer cannot be located", async (t) => {
   const bundleDir = fixture("export const unrelated = 1;");
   t.after(() => fs.rmSync(bundleDir, { recursive: true, force: true }));

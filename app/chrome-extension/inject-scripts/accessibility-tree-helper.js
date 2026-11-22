@@ -130,7 +130,7 @@
   const visibleTextFilter = {
     acceptNode(node) {
       const parent = node.parentElement;
-      return parent && NON_TEXT_CONTAINERS.has(parent.tagName)
+      return parent && NON_TEXT_CONTAINERS.has(String(parent.tagName || '').toUpperCase())
         ? NodeFilter.FILTER_REJECT
         : NodeFilter.FILTER_ACCEPT;
     },

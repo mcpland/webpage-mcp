@@ -183,4 +183,52 @@ describe('fill-helper bounded shadow search', () => {
 
     expect(response.error).toContain('not a fillable element');
   });
+
+  it('scrolls an offscreen rendered input into view before visibility check and reports ref on error', async () => {
+    document.body.innerHTML = '<input id="below" /><span id="not-input">text</span>';
+    const input = document.getElementById('below') as HTMLInputElement;
+    let scrolled = false;
+    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      scrolled = true;
+    });
+    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+      const top = this === input && !scrolled ? 5000 : 10;
+      return {
+        x: 0,
+        y: top,
+        width: 100,
+        height: 20,
+        top,
+        right: 100,
+        bottom: top + 20,
+        left: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    });
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => (scrolled ? input : null)),
+    });
+    const listener = loadHelper();
+
+    const filled = await dispatch(listener, {
+      action: 'fillElement',
+      selector: '#below',
+      value: 'scrolled-in',
+    });
+    expect(filled).toMatchObject({ success: true });
+    expect(scrolled).toBe(true);
+    expect(input.value).toBe('scrolled-in');
+
+    (window as any).__claudeElementMap = {
+      ref_99: new WeakRef(document.getElementById('not-input')!),
+    };
+    const badRef = await dispatch(listener, {
+      action: 'fillElement',
+      ref: 'ref_99',
+      value: 'nope',
+    });
+    expect(badRef.error).toContain('ref_99');
+    expect(badRef.error).not.toContain('undefined');
+  });
 });

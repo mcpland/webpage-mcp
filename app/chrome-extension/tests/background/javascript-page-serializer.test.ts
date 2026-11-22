@@ -369,4 +369,40 @@ describe("bounded JavaScript page serializer", () => {
     expect(result.errorKind).toBe("syntax_error");
     expect(utf8Bytes(result.message)).toBeLessThanOrEqual(256);
   });
+
+  it("keeps non-bigint evaluations working and fails closed on bigints when page BigInt or String.repeat is poisoned", () => {
+    const originalBigInt = globalThis.BigInt;
+    const repeatSpy = vi
+      .spyOn(String.prototype, "repeat")
+      .mockImplementation(() => {
+        throw new Error("repeat poisoned");
+      });
+    try {
+      (globalThis as any).BigInt = () => {
+        throw new Error("BigInt poisoned");
+      };
+
+      const plain = serialize({ ok: true, count: 42 });
+      expect(plain).toMatchObject({
+        status: "success",
+        text: '{"ok":true,"count":42}',
+      });
+
+      const bigVal = serialize(originalBigInt(12));
+      expect(bigVal).toMatchObject({
+        status: "success",
+        text: '"[BigInt exceeds serialization limit]"',
+        truncated: true,
+      });
+
+      const bigErr = serializeError(originalBigInt(12));
+      expect(bigErr).toMatchObject({
+        status: "error",
+        message: "[BigInt error exceeds serialization limit]",
+      });
+    } finally {
+      (globalThis as any).BigInt = originalBigInt;
+      repeatSpy.mockRestore();
+    }
+  });
 });

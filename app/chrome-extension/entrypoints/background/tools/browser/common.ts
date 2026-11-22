@@ -30,7 +30,7 @@ interface NavigateToolParams {
   windowId?: number;
   background?: boolean; // when true, do not activate tab or focus window
   waitUntil?: NavigationWaitUntil; // 'load' (default) or 'commit'
-  includeSnapshot?: boolean | { filter?: 'interactive'; scope?: 'viewport' | 'page' };
+  includeSnapshot?: boolean | { filter?: 'interactive' | 'all'; scope?: 'viewport' | 'page' };
 }
 
 type SnapshotOptions = { filter?: 'interactive'; scope?: 'viewport' | 'page' };
@@ -173,6 +173,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
       waitUntil?: NavigationWaitUntil;
     } = {},
   ): Promise<chrome.tabs.Tab> {
+    // Navigating a tab to the URL it is already on still reloads the document;
+    // waitForCommittedTab would otherwise return on poll 0 because urlsMatch is already true.
+    if (
+      options.previousUrl &&
+      options.targetUrl &&
+      urlsMatch(options.previousUrl, options.targetUrl)
+    ) {
+      return this.waitForNavigationToSettle(
+        tabId,
+        options.previousUrl,
+        options.waitUntil ?? 'load',
+      );
+    }
     const startedAt = Date.now();
     const committed = await this.waitForCommittedTab(tabId, options);
     if (options.waitUntil === 'commit' || committed.status === 'complete') {
@@ -204,8 +217,24 @@ class NavigateTool extends BaseBrowserToolExecutor {
     tabId: number,
     previousUrl: string,
     waitUntil: NavigationWaitUntil,
+    options: { expectUrlChange?: boolean } = {},
   ): Promise<chrome.tabs.Tab> {
-    if (waitUntil === 'commit') return chrome.tabs.get(tabId);
+    if (waitUntil === 'commit') {
+      if (!options.expectUrlChange) return chrome.tabs.get(tabId);
+      // History back/forward updates the tab URL asynchronously; wait briefly
+      // for the new URL to commit so scheme checks and snapshots see the destination.
+      const commitDeadline = Date.now() + NAVIGATION_START_GRACE_MS;
+      for (;;) {
+        const current = await chrome.tabs.get(tabId);
+        if (
+          (current.url || '') !== previousUrl ||
+          Date.now() >= commitDeadline
+        ) {
+          return current;
+        }
+        await this.sleep(NAVIGATION_POLL_MS);
+      }
+    }
     const startedAt = Date.now();
     let started = false;
     for (;;) {
@@ -354,7 +383,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
     createdWindow: chrome.windows.Window,
     message: string,
     tabs: chrome.tabs.Tab[],
+    waitUntil: NavigationWaitUntil = 'load',
   ): ToolResult {
+    const primary = tabs.length === 1 ? tabs[0] : undefined;
     return {
       content: [
         {
@@ -363,9 +394,11 @@ class NavigateTool extends BaseBrowserToolExecutor {
             success: true,
             message,
             windowId: createdWindow.id,
+            ...(primary ? this.loadState(primary, waitUntil) : {}),
             tabs: tabs.map((tab) => ({
               tabId: tab.id,
               url: tab.url,
+              ...this.loadState(tab, waitUntil),
             })),
           }),
         },
@@ -503,6 +536,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           targetTab.id,
           urlBeforeHistory,
           waitUntil,
+          { expectUrlChange: true },
         );
         if (hasDisallowedPublicUrlScheme(String(updatedTab.url || ''))) {
           return createErrorResponse(getNavigateTargetPageError('history'));
@@ -644,6 +678,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
               createdWindow,
               'Opened URL in new window',
               [updatedFirstTab],
+              waitUntil,
             );
           }
 
@@ -651,6 +686,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             createdWindow,
             'Opened URL in new window',
             windowTabs,
+            waitUntil,
           );
         }
       }
@@ -710,6 +746,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             fallbackWindow,
             'Opened URL in new window',
             [updatedFirstTab],
+            waitUntil,
           );
         }
 
@@ -717,6 +754,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           fallbackWindow,
           'Opened URL in new window',
           fallbackTabs,
+          waitUntil,
         );
       }
 
@@ -979,19 +1017,28 @@ async function findTabsBySelector(selector: {
   const tabs = await chrome.tabs.query(
     typeof selector.windowId === 'number' ? { windowId: selector.windowId } : {},
   );
-  const urlNeedle = selector.url ? normalizeTabUrlForMatch(selector.url) : undefined;
+  const rawUrlNeedle = selector.url?.trim().toLowerCase();
+  const exactUrlNeedle = rawUrlNeedle ? normalizeTabUrlForMatch(rawUrlNeedle) : undefined;
   const titleNeedle = selector.title?.trim().toLowerCase();
+  const isExact = (tab: chrome.tabs.Tab) =>
+    exactUrlNeedle !== undefined &&
+    exactUrlNeedle.length > 0 &&
+    normalizeTabUrlForMatch(String(tab.url || '')) === exactUrlNeedle;
   const matches = tabs.filter((tab) => {
     const url = String(tab.url || '');
     if (typeof tab.id !== 'number' || !/^https?:\/\//i.test(url)) return false;
-    if (urlNeedle && !url.toLowerCase().includes(urlNeedle)) return false;
-    if (titleNeedle && !String(tab.title || '').toLowerCase().includes(titleNeedle)) {
+    if (rawUrlNeedle !== undefined) {
+      const lowerUrl = url.toLowerCase();
+      if (!lowerUrl.includes(rawUrlNeedle) && !isExact(tab)) return false;
+    }
+    if (
+      titleNeedle !== undefined &&
+      !String(tab.title || '').toLowerCase().includes(titleNeedle)
+    ) {
       return false;
     }
     return true;
   });
-  const isExact = (tab: chrome.tabs.Tab) =>
-    urlNeedle !== undefined && normalizeTabUrlForMatch(String(tab.url || '')) === urlNeedle;
   const lastAccessed = (tab: chrome.tabs.Tab) =>
     (tab as chrome.tabs.Tab & { lastAccessed?: number }).lastAccessed ?? 0;
   return matches.sort(

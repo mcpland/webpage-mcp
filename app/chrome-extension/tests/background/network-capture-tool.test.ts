@@ -294,4 +294,33 @@ describe('networkCaptureTool', () => {
       }),
     );
   });
+
+  it('rejects scheme-less or whitespace-only URLs and trims valid HTTP(S) URLs', async () => {
+    const { networkCaptureTool } = await loadNetworkCaptureTool();
+    mocks.webRequestStartExecute.mockResolvedValue({
+      content: [{ type: 'text', text: JSON.stringify({ success: true, tabId: 7 }) }],
+      isError: false,
+    });
+
+    const schemeless = await networkCaptureTool.execute({
+      action: 'start',
+      url: 'example.com/api',
+    });
+    expect(schemeless.isError).toBe(true);
+
+    const blank = await networkCaptureTool.execute({
+      action: 'start',
+      url: '   ',
+    });
+    expect(blank.isError).toBe(true);
+
+    const padded = await networkCaptureTool.execute({
+      action: 'start',
+      url: '  https://example.com/api  ',
+    });
+    expect(padded.isError).toBe(false);
+    expect(mocks.webRequestStartExecute).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://example.com/api' }),
+    );
+  });
 });

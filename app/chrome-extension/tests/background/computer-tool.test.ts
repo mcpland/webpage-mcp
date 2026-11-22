@@ -389,4 +389,110 @@ describe('computerTool', () => {
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload.target.text).toBe('Bounded hover label');
   });
+
+  it('returns clickTool errors for coordinate left_click instead of falling through to raw CDP', async () => {
+    vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(clickTool, 'execute').mockResolvedValue({
+      content: [{ type: 'text', text: 'Invalid waitForDownload timeoutMs' }],
+      isError: true,
+    });
+    const sendCommand = vi.spyOn(cdpSessionManager, 'sendCommand').mockResolvedValue({});
+
+    const result = await computerTool.execute({
+      tabId: 7,
+      action: 'left_click',
+      coordinates: { x: 20, y: 30 },
+      waitForDownload: { timeoutMs: 5 },
+    } as any);
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string }).text)).toContain('Invalid waitForDownload');
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
+
+  it('reports PageUnresponsiveError when targetless scroll hits a blocked page', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+      vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+      vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
+      vi.spyOn(cdpSessionManager, 'sendCommand').mockImplementation(async (_tabId, method) =>
+        method === 'Page.enable' ? new Promise(() => {}) : {},
+      );
+
+      const pending = computerTool.execute({
+        tabId: 7,
+        action: 'scroll',
+        scrollDirection: 'down',
+      } as any);
+      await vi.advanceTimersByTimeAsync(2500);
+      const result = await pending;
+
+      expect(result.isError).toBe(true);
+      expect(String((result.content[0] as { text?: string }).text)).toContain('not responding');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects whitespace-only key actions', async () => {
+    vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+
+    const result = await computerTool.execute({
+      tabId: 7,
+      action: 'key',
+      text: '   ',
+    } as any);
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string }).text)).toContain(
+      'text is required for key action',
+    );
+  });
+
+  it('does not fall back to DOM typing when CDP fails after input dispatch starts', async () => {
+    vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'sendCommand').mockImplementation(async (_tabId, method) => {
+      if (method === 'Input.insertText') throw new Error('Detached mid-type');
+      return {};
+    });
+    const helper = vi.spyOn(keyboardTool, 'sendHelperSteps');
+
+    const result = await computerTool.execute({
+      tabId: 7,
+      action: 'type',
+      text: 'hello',
+      background: true,
+    } as any);
+
+    expect(result.isError).toBe(true);
+    expect(helper).not.toHaveBeenCalled();
+  });
+
+  it('targets the child frame when domHoverFallback runs with a ref and frameId', async () => {
+    const injectHelper = vi
+      .spyOn(computerTool as any, 'injectAccessibilityHelper')
+      .mockResolvedValue(undefined);
+    const sendMessageToTab = vi
+      .spyOn(computerTool as any, 'sendMessageToTab')
+      .mockResolvedValue({ success: true, target: { tagName: 'DIV' } });
+
+    const result = await (computerTool as any).domHoverFallback(
+      7,
+      { x: 10, y: 20 },
+      'ref',
+      'ref_1',
+      12,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(injectHelper).toHaveBeenCalledWith(7, 12);
+    expect(sendMessageToTab).toHaveBeenCalledWith(
+      7,
+      { action: 'dispatchHoverForRef', ref: 'ref_1' },
+      12,
+    );
+  });
 });

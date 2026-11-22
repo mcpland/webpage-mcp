@@ -47,6 +47,25 @@ function hasDisallowedPublicPageScheme(url: string): boolean {
   return protocol !== 'http' && protocol !== 'https';
 }
 
+function normalizePublicCaptureUrl(rawUrl: unknown): string | undefined | Error {
+  if (rawUrl === undefined || rawUrl === null) return undefined;
+  if (typeof rawUrl !== 'string') return new Error(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return new Error(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);
+  if (utf8ByteLength(trimmed) > NETWORK_CAPTURE_LIMITS.maxUrlBytes) {
+    return new Error('Network capture URL is too long.');
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return new Error(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);
+    }
+  } catch {
+    return new Error(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);
+  }
+  return trimmed;
+}
+
 /**
  * Extract text content from ToolResult
  */
@@ -296,6 +315,15 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
       isDebuggerCaptureActive(),
       isWebRequestCaptureActive(),
     );
+    // Clean up any child tabs that inherited capture from this root tab so
+    // subsequent start calls are not blocked by leaked background captures.
+    const owner = backend === 'debugger' ? networkDebuggerStartTool : networkCaptureStartTool;
+    const stopLineage = (
+      owner as unknown as { stopLineageCaptures?: (rootTabId: number) => Promise<void> }
+    ).stopLineageCaptures;
+    if (typeof stopLineage === 'function') {
+      await stopLineage.call(owner, tabId).catch(() => {});
+    }
     return decorateJsonResult(stopResult, { oneShot: true, durationMs, waitedMs });
   }
 
@@ -313,20 +341,14 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
       );
     }
 
-    if (typeof args.url === 'string' && hasDisallowedPublicPageScheme(args.url)) {
-      return createErrorResponse(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);
-    }
-    if (
-      typeof args.url === 'string' &&
-      utf8ByteLength(args.url) > NETWORK_CAPTURE_LIMITS.maxUrlBytes
-    ) {
-      return createErrorResponse('Network capture URL is too long.');
+    const normalizedUrl = normalizePublicCaptureUrl(args.url);
+    if (normalizedUrl instanceof Error) {
+      return createErrorResponse(normalizedUrl.message);
     }
 
     // With a url the capture runs on that (already validated) page, so the tab's
     // current page, such as a fresh browser's new-tab page, does not matter.
-    const hasTargetUrl = typeof args.url === 'string' && args.url.trim() !== '';
-    if (!hasTargetUrl) {
+    if (!normalizedUrl) {
       const explicitTab = await this.tryGetTab(args.tabId);
       const targetTab = explicitTab || (await this.getActiveTabInWindow(args.windowId));
       if (targetTab?.url && hasDisallowedPublicPageScheme(String(targetTab.url))) {
@@ -339,7 +361,7 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
     const timings = normalizeCaptureTimings(args);
 
     const result = await delegate.execute({
-      url: args.url,
+      url: normalizedUrl,
       maxCaptureTime: timings.maxCaptureTime,
       inactivityTimeout: timings.inactivityTimeout,
       includeStatic: args.includeStatic,
