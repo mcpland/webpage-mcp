@@ -77,6 +77,35 @@ describe('keyboard-helper page protocol', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it('obeys the first submit button and preserves its click and submitter', async () => {
+    document.body.innerHTML = '<button form="f" disabled>Save</button><form id="f"><input><button>Other</button></form>';
+    const button = document.querySelector('button')!;
+    const form = document.querySelector('form')!;
+    const submitters: Array<HTMLElement | null> = [];
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      submitters.push(event.submitter);
+    });
+    document.querySelector('input')!.focus();
+    const listener = executeHelper();
+    await sendKeys(listener, 'Enter');
+    expect(submitters).toEqual([]);
+    button.disabled = false;
+    button.addEventListener('click', (event) => event.preventDefault(), { once: true });
+    await sendKeys(listener, 'Enter');
+    expect(submitters).toEqual([]);
+    await sendKeys(listener, 'Enter');
+    expect(submitters).toEqual([button]);
+
+    document.querySelectorAll('button').forEach((item) => item.remove());
+    form.append(document.createElement('input'));
+    await sendKeys(listener, 'Enter');
+    expect(submitters).toEqual([button]);
+    form.lastElementChild!.remove();
+    await sendKeys(listener, 'Enter');
+    expect(submitters).toEqual([button, null]);
+  });
+
   it('initializes once and answers the synchronous health check', async () => {
     const listener = executeHelper();
     executeHelper(false);

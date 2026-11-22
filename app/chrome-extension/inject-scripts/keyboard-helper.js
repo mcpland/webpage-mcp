@@ -176,6 +176,23 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     }
   }
 
+  function submitImplicitly(form) {
+    // The default submitter is the first submit button in tree order, including
+    // buttons associated via form="...". Its click may be disabled or cancelled.
+    const controls = Array.from(form.getRootNode().querySelectorAll('input, button'))
+      .filter((control) => control.form === form);
+    const submitter = controls.find((control) => control.type === 'submit' || control.type === 'image');
+    if (submitter) {
+      submitter.click();
+      return;
+    }
+    const blockingTypes = ['text', 'search', 'url', 'tel', 'email', 'password', 'date',
+      'month', 'week', 'time', 'datetime-local', 'number'];
+    if (controls.filter((control) => blockingTypes.includes(control.type)).length <= 1) {
+      HTMLFormElement.prototype.requestSubmit.call(form);
+    }
+  }
+
   function applyEdit(element, key, modifiers, text) {
     const isTextInput = element.tagName === 'INPUT' &&
       ['text', 'search', 'url', 'tel', 'email', 'password', 'number'].includes(element.type);
@@ -196,7 +213,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       else if (key === 'Backspace') command = 'delete';
       else if (key === 'Delete') command = 'forwardDelete';
       else if (key === 'Enter' && element.matches('input') && element.form) {
-        element.form.requestSubmit();
+        submitImplicitly(element.form);
         return;
       } else if (key === 'Enter' && (element.matches('textarea') || element.isContentEditable)) {
         command = 'insertLineBreak';
