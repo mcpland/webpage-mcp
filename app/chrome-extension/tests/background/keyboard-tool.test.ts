@@ -210,6 +210,7 @@ describe('keyboardTool', () => {
     });
 
     expect(result.isError).toBe(false);
+    expect(JSON.parse((result.content[0] as { text: string }).text).selector).toBe('input[name="email"]');
     expect(injectContentScript).toHaveBeenNthCalledWith(
       1,
       7,
@@ -295,7 +296,7 @@ describe('keyboardTool', () => {
 
   it('does not dispatch fallback keys when an automatic dialog response was requested', async () => {
     const inject = vi.spyOn(keyboardTool as any, 'injectContentScript');
-    const result = await keyboardTool.sendHelperSteps(7, 'Enter', [], 0, undefined, undefined, { action: 'accept' });
+    const result = await keyboardTool.sendHelperSteps(7, 'Enter', [], 0, { dialog: { action: 'accept' } });
     expect(result.isError).toBe(true);
     expect(inject).not.toHaveBeenCalled();
   });

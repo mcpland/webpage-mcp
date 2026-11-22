@@ -92,10 +92,9 @@ class KeyboardTool extends BaseBrowserToolExecutor {
     keys: string,
     steps: KeyboardStep[],
     delay: number,
-    selector?: string,
-    frameId?: number,
-    dialog?: DialogResponse,
+    options: { selector?: string; focusedByRef?: boolean; frameId?: number; dialog?: DialogResponse } = {},
   ): Promise<ToolResult> {
+    const { selector, focusedByRef, frameId, dialog } = options;
     if (dialog) {
       return createErrorResponse('Automatic dialog responses require a debugger connection. No fallback keys were sent.');
     }
@@ -107,7 +106,8 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         await this.injectContentScript(tabId, ['inject-scripts/keyboard-helper.js'], false, 'ISOLATED', false, frames);
         if (Date.now() >= deadline) throw new Error('Keyboard helper timed out before dispatch');
         return this.sendMessageToTab(tabId, {
-          action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD, keys, steps, selector, delay, deadline,
+          action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD, keys, steps,
+          selector: focusedByRef ? undefined : selector, delay, deadline,
         }, frameId);
       };
       const result = await withTimeout(dispatch(), timeoutMs, 'Keyboard helper');
@@ -268,7 +268,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         );
         return this.sendHelperSteps(
           targetTabId, keys, parseKeyboardInput(keys), delay,
-          refForFocus ? undefined : finalSelector, targetFrameId, dialogResponse,
+          { selector: finalSelector, focusedByRef: !!refForFocus, frameId: targetFrameId, dialog: dialogResponse },
         );
       }
 
