@@ -2,7 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
-import { answerDialog, isTimeoutError, sendTimedDialogCommand } from '@/utils/cdp-input';
+import { answerDialog, isTimeoutError, sendTimedDialogCommand, withTimeout } from '@/utils/cdp-input';
 import { describeDialog, dialogTracker, type PendingDialog } from '@/utils/dialog-tracker';
 import { hasDisallowedPublicUrlScheme } from './common';
 
@@ -13,6 +13,7 @@ interface HandleDialogParams {
   windowId?: number;
 }
 
+const DIALOG_CONNECT_TIMEOUT_MS = 5000;
 const RESPONSIVENESS_PROBE_TIMEOUT_MS = 1500;
 const FOLLOW_UP_DIALOG_GRACE_MS = 300;
 
@@ -20,6 +21,25 @@ const UNTRACKED_DIALOG_MESSAGE =
   'A JavaScript dialog appears to be blocking this tab, but it opened while no debugger session was observing the page, so Chrome cannot answer it remotely. ' +
   'Ask the user to close it, or reload the tab with chrome_navigate({ refresh: true }) to discard it. ' +
   'To avoid this, pass dialog: "accept" | "dismiss" to the click or key action that opens the dialog.';
+
+async function withDialogSession<T>(tabId: number, action: () => Promise<T>): Promise<T> {
+  const owner = Symbol('dialog');
+  const connecting = cdpSessionManager.attach(tabId, owner);
+  try {
+    await withTimeout(connecting, DIALOG_CONNECT_TIMEOUT_MS, 'Dialog debugger connection');
+  } catch (error) {
+    if (isTimeoutError(error)) {
+      // Chrome cannot cancel attach. A late connection may only release this request's lease.
+      void connecting.then(() => cdpSessionManager.detach(tabId, owner)).catch(() => {});
+    }
+    throw error;
+  }
+  try {
+    return await action();
+  } finally {
+    await cdpSessionManager.detach(tabId, owner);
+  }
+}
 
 /** True when the page's main thread still answers the debugger. */
 async function isPageResponsive(tabId: number): Promise<boolean> {
@@ -72,7 +92,7 @@ class HandleDialogTool extends BaseBrowserToolExecutor {
 
       let nextDialog: PendingDialog | null;
       try {
-        nextDialog = await cdpSessionManager.withSession(targetTabId, 'dialog', async () => {
+        nextDialog = await withDialogSession(targetTabId, async () => {
           await answerDialog(targetTabId, { action, promptText }, tracked);
           // Keep the observing session attached between the close and the next opening.
           const watcher = dialogTracker.waitForDialog(targetTabId);
@@ -95,7 +115,7 @@ class HandleDialogTool extends BaseBrowserToolExecutor {
         }
         if (isTimeoutError(error)) {
           return createErrorResponse(
-            `Timed out while answering the dialog. ${UNTRACKED_DIALOG_MESSAGE}`,
+            `${message}. ${UNTRACKED_DIALOG_MESSAGE}`,
           );
         }
         throw error;

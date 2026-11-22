@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   attach: vi.fn(),
   detach: vi.fn(),
-  withSession: vi.fn(),
   sendCommand: vi.fn(),
   tabsGet: vi.fn(),
   tabsQuery: vi.fn(),
@@ -13,7 +12,6 @@ vi.mock('@/utils/cdp-session-manager', () => ({
   cdpSessionManager: {
     attach: mocks.attach,
     detach: mocks.detach,
-    withSession: mocks.withSession,
     sendCommand: mocks.sendCommand,
   },
 }));
@@ -41,7 +39,6 @@ describe('handleDialogTool', () => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.attach.mockResolvedValue(undefined);
     mocks.detach.mockResolvedValue(undefined);
-    mocks.withSession.mockImplementation(async (_tabId, _scope, fn) => await fn());
     mocks.sendCommand.mockResolvedValue(undefined);
     mocks.tabsGet.mockResolvedValue(makeTab());
     mocks.tabsQuery.mockResolvedValue([makeTab()]);
@@ -75,7 +72,23 @@ describe('handleDialogTool', () => {
     expect(textOf(result)).toContain(
       'Only http:// and https:// pages are supported by chrome_handle_dialog',
     );
-    expect(mocks.withSession).not.toHaveBeenCalled();
+    expect(mocks.attach).not.toHaveBeenCalled();
+    expect(mocks.sendCommand).not.toHaveBeenCalled();
+  });
+
+  it('times out acquiring the debugger and releases a late attachment without answering', async () => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    mocks.attach.mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+    const pending = handleDialogTool.execute({ tabId: 7, action: 'accept' });
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await pending;
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('Dialog debugger connection timed out after 5000ms');
+    expect(mocks.detach).not.toHaveBeenCalled();
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.detach.mock.calls).toEqual(mocks.attach.mock.calls);
     expect(mocks.sendCommand).not.toHaveBeenCalled();
   });
 
