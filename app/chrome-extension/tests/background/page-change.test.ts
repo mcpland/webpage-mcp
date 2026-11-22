@@ -128,28 +128,35 @@ describe('page change summary', () => {
     }
   });
 
-  it('settles a redirected download on a loading tab without reporting a navigation', async () => {
+  it.each([false, true])('settles an unreported redirect while preserving a pending replacement (%s)', async (replaced) => {
     vi.useFakeTimers();
-    const originalNavigation = chrome.webNavigation;
-    const originalRequests = chrome.webRequest;
+    const original = chrome.webNavigation;
     const event = () => ({ addListener: vi.fn(), removeListener: vi.fn() });
-    const onBeforeNavigate = event(), onBeforeRedirect = event(), onErrorOccurred = event();
-    Object.assign(chrome, { webNavigation: { onBeforeNavigate, onCommitted: event(), onErrorOccurred },
-      webRequest: { onBeforeRedirect } });
+    const events = { onBeforeNavigate: event(), onCommitted: event(), onErrorOccurred: event() };
+    Object.assign(chrome, { webNavigation: events });
     try {
-      tabs.set(7, { id: 7, url: 'https://example.com/', status: 'loading' });
+      const tab = { id: 7, url: 'https://example.com/', status: 'loading' as const };
+      tabs.set(7, tab);
       const observer = (await observePageChanges(7, 0))!;
       const frame = { tabId: 7, frameId: 0 };
-      const start = 'https://example.com/go', middle = 'https://example.com/next', file = 'https://example.com/file';
-      onBeforeNavigate.addListener.mock.calls[0][0]({ ...frame, url: start });
-      const redirect = onBeforeRedirect.addListener.mock.calls[0][0];
-      redirect({ ...frame, url: start, redirectUrl: middle });
-      redirect({ ...frame, url: middle, redirectUrl: file });
-      onErrorOccurred.addListener.mock.calls[0][0]({ ...frame, url: file, error: 'net::ERR_ABORTED' });
-      expect(await observer.finish(okResult())).toBeUndefined();
-      expect(onBeforeRedirect.removeListener).toHaveBeenCalledWith(redirect);
+      const start = events.onBeforeNavigate.addListener.mock.calls[0][0];
+      start({ ...frame, url: 'https://example.com/go' });
+      const fail = events.onErrorOccurred.addListener.mock.calls[0][0];
+      fail({ ...frame, url: 'https://example.com/attachment', error: 'net::ERR_ABORTED' });
+      if (replaced) {
+        start({ ...frame, url: tab.url });
+        tabs.set(7, { ...tab, pendingUrl: tab.url });
+        fail({ ...frame, url: 'https://example.com/previous', error: 'net::ERR_ABORTED' });
+        setTimeout(() => {
+          tabs.set(7, { ...tab, status: 'complete', title: 'Replacement' });
+          events.onCommitted.addListener.mock.calls[0][0]({ ...frame, url: tab.url });
+        }, 300);
+      }
+      const result = observer.finish(okResult());
+      await vi.advanceTimersByTimeAsync(400);
+      expect(await result).toEqual(replaced ? { navigated: true, url: tab.url, title: 'Replacement' } : undefined);
     } finally {
-      Object.assign(chrome, { webNavigation: originalNavigation, webRequest: originalRequests });
+      Object.assign(chrome, { webNavigation: original });
     }
   });
 

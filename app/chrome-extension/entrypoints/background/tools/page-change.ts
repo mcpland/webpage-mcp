@@ -140,24 +140,20 @@ export async function observePageChanges(
   let urlChanged = false;
   let sawLoading = false;
   let topFrameCommitted = false;
-  let pendingReloadUrl: string | undefined;
-  // On an already-loading tab a second load has no distinct tabs.onUpdated transition.
+  // A loading tab has no second tabs.onUpdated transition when another load starts.
   const navigation = before.status === 'loading' ? chrome.webNavigation : undefined;
+  let pendingReload: object | undefined;
   const onBeforeNavigate = (details: chrome.webNavigation.WebNavigationParentedCallbackDetails) => {
-    if (details.tabId === tabId && details.frameId === 0) pendingReloadUrl = details.url;
-  };
-  // webNavigation reports the initial URL at start and the final URL on error.
-  // Follow the main-frame redirect chain so a download can settle without a commit.
-  const redirects = navigation && chrome.webRequest?.onBeforeRedirect;
-  const onRedirect = (details: chrome.webRequest.WebRedirectionResponseDetails) => {
-    if (details.tabId === tabId && details.frameId === 0 && details.url === pendingReloadUrl) {
-      pendingReloadUrl = details.redirectUrl;
-    }
+    if (details.tabId === tabId && details.frameId === 0) pendingReload = details;
   };
   const onNavigationError = (details: chrome.webNavigation.WebNavigationFramedErrorCallbackDetails) => {
-    if (details.tabId === tabId && details.frameId === 0 && details.url === pendingReloadUrl) {
-      pendingReloadUrl = undefined;
-    }
+    if (details.tabId !== tabId || details.frameId !== 0 || !pendingReload) return;
+    const attempt = pendingReload;
+    // A service worker redirect can fail at a URL Chrome never reported to webRequest.
+    // Chrome clears pendingUrl for a download, but retains it for a replacement load.
+    void chrome.tabs.get(tabId).then((tab) => {
+      if (pendingReload === attempt && !tab.pendingUrl) pendingReload = undefined;
+    }).catch(() => {});
   };
 
   const onCreated = (tab: chrome.tabs.Tab) => {
@@ -175,7 +171,6 @@ export async function observePageChanges(
   chrome.tabs.onUpdated.addListener(onUpdated);
   if (hasWebNavigation) chrome.webNavigation.onCommitted.addListener(onCommitted);
 
-  redirects?.addListener(onRedirect, { urls: ['<all_urls>'], types: ['main_frame'], tabId });
   navigation?.onBeforeNavigate?.addListener(onBeforeNavigate);
   navigation?.onErrorOccurred?.addListener(onNavigationError);
 
@@ -186,7 +181,6 @@ export async function observePageChanges(
     chrome.tabs.onCreated.removeListener(onCreated);
     chrome.tabs.onUpdated.removeListener(onUpdated);
     if (hasWebNavigation) chrome.webNavigation.onCommitted.removeListener(onCommitted);
-    redirects?.removeListener(onRedirect);
     navigation?.onBeforeNavigate?.removeListener(onBeforeNavigate);
     navigation?.onErrorOccurred?.removeListener(onNavigationError);
     signal?.removeEventListener('abort', stop);
@@ -215,7 +209,7 @@ export async function observePageChanges(
         if (signal?.aborted) return undefined;
         const deadline = Date.now() + PAGE_CHANGE_LOAD_WAIT_MS;
         const blocked = hasPendingDialog(result);
-        while (after && pendingReloadUrl !== undefined && !topFrameCommitted && !blocked && !signal?.aborted && Date.now() < deadline) {
+        while (after && pendingReload !== undefined && !topFrameCommitted && !blocked && !signal?.aborted && Date.now() < deadline) {
           await sleep(LOAD_POLL_MS, signal);
           after = await chrome.tabs.get(tabId).catch(() => undefined);
         }
@@ -230,7 +224,7 @@ export async function observePageChanges(
           (urlChanged ||
             urlDiffers ||
             topFrameCommitted ||
-            pendingReloadUrl !== undefined ||
+            pendingReload !== undefined ||
             startedLoading ||
             (!hasWebNavigation && sawLoading));
         // A pending dialog blocks the page, so its navigation cannot finish.
@@ -249,7 +243,7 @@ export async function observePageChanges(
         } else if (navigated) {
           summary.navigated = true;
           Object.assign(summary, publicPageFields(after));
-          if (after.status !== 'complete' || (pendingReloadUrl !== undefined && !topFrameCommitted)) summary.loading = true;
+          if (after.status !== 'complete' || (pendingReload !== undefined && !topFrameCommitted)) summary.loading = true;
         }
         const newTabs = await describeNewTabs();
         if (newTabs.length > 0) summary.newTabs = newTabs;
