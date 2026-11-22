@@ -87,6 +87,12 @@ describe('page change summary', () => {
     });
   });
 
+  it('ignores a pending resource that was already loading before the action', async () => {
+    tabs.set(7, { id: 7, url: 'https://example.com/', status: 'loading' });
+    const observer = (await observePageChanges(7, 0))!;
+    expect(await observer.finish(okResult())).toBeUndefined();
+  });
+
   it('returns nothing when the page did not change', async () => {
     const observer = (await observePageChanges(7, 0))!;
     expect(await observer.finish(okResult())).toBeUndefined();

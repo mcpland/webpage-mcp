@@ -188,7 +188,7 @@ export async function observePageChanges(
         let after = await chrome.tabs.get(tabId).catch(() => undefined);
         if (signal?.aborted) return undefined;
         const urlDiffers = after !== undefined && currentUrl(after) !== beforeUrl;
-        const stillLoading = after !== undefined && after.status !== 'complete';
+        const startedLoading = before.status === 'complete' && after?.status === 'loading';
         // When webNavigation.onCommitted is available, ignore transient
         // status='loading' events (downloads, dynamic iframes, cancelled loads)
         // that completed on the same URL without a top-frame commit.
@@ -197,7 +197,7 @@ export async function observePageChanges(
           (urlChanged ||
             urlDiffers ||
             topFrameCommitted ||
-            stillLoading ||
+            startedLoading ||
             (!hasWebNavigation && sawLoading));
         // A pending dialog blocks the page, so its navigation cannot finish.
         if (navigated && !hasPendingDialog(result)) {
