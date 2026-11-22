@@ -249,6 +249,25 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       }
       return;
     }
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(key)) {
+      const selection = element.ownerDocument.getSelection();
+      if (!selection?.modify) throw new Error('The browser cannot move the caret in this field');
+      const mac = /mac/i.test(navigator.platform);
+      const word = mac ? modifiers.altKey : modifiers.ctrlKey;
+      const lineEdge = key === 'Home' || key === 'End' || mac && modifiers.metaKey;
+      let granularity = word ? 'word' : 'character';
+      let direction = key === 'ArrowLeft' ? 'left' : 'right';
+      if (lineEdge || key === 'ArrowUp' || key === 'ArrowDown') {
+        direction = ['Home', 'ArrowLeft', 'ArrowUp'].includes(key) ? 'backward' : 'forward';
+        granularity = lineEdge ? 'lineboundary' : 'line';
+        if ((key === 'Home' || key === 'End') && modifiers.ctrlKey ||
+            mac && modifiers.metaKey && (key === 'ArrowUp' || key === 'ArrowDown')) {
+          granularity = 'documentboundary';
+        }
+      }
+      selection.modify(modifiers.shiftKey ? 'extend' : 'move', direction, granularity);
+      return;
+    }
     const commandKey = modifiers.ctrlKey || modifiers.metaKey;
     let command;
     if (commandKey && !modifiers.altKey && !modifiers.shiftKey && key.toLowerCase() === 'a') command = 'selectAll';

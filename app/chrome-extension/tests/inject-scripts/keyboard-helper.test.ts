@@ -125,6 +125,24 @@ describe('keyboard-helper page protocol', () => {
     expect(atA).toHaveBeenCalledTimes(1);
   });
 
+  it('moves the browser caret before deleting and supports extending the selection', async () => {
+    const field = document.createElement('input');
+    document.body.append(field);
+    field.focus();
+    const operations: string[] = [];
+    const selection = document.getSelection()!;
+    Object.defineProperty(selection, 'modify', { configurable: true, value: (...args: string[]) => operations.push(args.join(' ')) });
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: (command: string) => { operations.push(command); return true; } });
+    try {
+      const result = await sendKeys(executeHelper(), 'ArrowLeft Backspace Shift+ArrowRight');
+      expect(result.success).toBe(true);
+      expect(operations).toEqual(['move left character', 'delete', 'extend right character']);
+    } finally {
+      Reflect.deleteProperty(selection, 'modify');
+      Reflect.deleteProperty(document, 'execCommand');
+    }
+  });
+
   it('initializes once and answers the synchronous health check', async () => {
     const listener = executeHelper();
     executeHelper(false);
