@@ -174,6 +174,17 @@ describe('keyboard-helper page protocol', () => {
     expect(field.value).toBe('');
   });
 
+  it('returns the failing stroke detail when a clear-only fallback has no label', async () => {
+    const field = document.createElement('input');
+    field.readOnly = true;
+    document.body.append(field);
+    field.focus();
+    const result = await dispatch(executeHelper(), {
+      action: 'simulateKeyboard', keys: '', steps: parseKeyboardInput('Backspace'),
+    });
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining('not editable') });
+  });
+
   it('initializes once and answers the synchronous health check', async () => {
     const listener = executeHelper();
     executeHelper(false);

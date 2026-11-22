@@ -372,6 +372,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
 
       return {
         success: overallSuccess,
+        ...(!overallSuccess && { error: operationResults.find((result) => !result.success)?.error }),
         message: overallSuccess
           ? `Keyboard events simulated successfully: ${keysSequenceString}`
           : `Some keyboard events failed for: ${keysSequenceString}`,
