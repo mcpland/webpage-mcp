@@ -6,6 +6,7 @@ import { NETWORK_FILTERS } from '@/common/constants';
 import {
   canAttachBeforeNavigation,
   fillMissingCaptureTabTitle,
+  loadIfStillBlank,
   NETWORK_CAPTURE_LIMITS,
   boundCaptureResult,
   jsonByteLength,
@@ -1189,14 +1190,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       );
     } finally {
       if (blankRecovery) {
-        const { tabId, url } = blankRecovery;
-        try {
-          const tab = await chrome.tabs.get(tabId);
-          // Preserve any navigation the user started while capture was connecting.
-          if ((tab.pendingUrl || tab.url) === 'about:blank') await chrome.tabs.update(tabId, { url });
-        } catch {
-          // The tab may have closed. Preserve the original capture failure.
-        }
+        await loadIfStillBlank(blankRecovery.tabId, blankRecovery.url);
       }
     }
   }

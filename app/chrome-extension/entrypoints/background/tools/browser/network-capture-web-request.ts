@@ -4,6 +4,7 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { LIMITS, NETWORK_FILTERS } from '@/common/constants';
 import {
   fillMissingCaptureTabTitle,
+  loadIfStillBlank,
   NETWORK_CAPTURE_LIMITS,
   boundCaptureResult,
   jsonByteLength,
@@ -1007,6 +1008,8 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       // The page at targetUrl is loaded only once the capture is listening;
       // loading it first lost its earliest requests, often the ones that matter.
       let loadAfterStart: string | undefined;
+      // Set when this call opened the tab blank, so a failed start can still load the page.
+      let createdBlankTab = false;
 
       if (targetUrl) {
         if (explicitTab?.id) {
@@ -1027,6 +1030,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
               active: background !== true,
               windowId,
             });
+            createdBlankTab = true;
             loadAfterStart = targetUrl;
           }
         }
@@ -1065,6 +1069,9 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
           pageUrl: loadAfterStart,
         });
       } catch (error: any) {
+        if (createdBlankTab && loadAfterStart) {
+          await loadIfStillBlank(tabToOperateOn.id, loadAfterStart);
+        }
         return createErrorResponse(
           `Failed to start capture for tab ${tabToOperateOn.id}: ${error.message || String(error)}`,
         );

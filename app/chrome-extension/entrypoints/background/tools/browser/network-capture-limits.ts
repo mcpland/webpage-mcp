@@ -202,3 +202,19 @@ export async function fillMissingCaptureTabTitle(
 export function canAttachBeforeNavigation(url: string | undefined): boolean {
   return /^(https?:\/\/|about:blank(?:[?#]|$))/i.test(String(url || ''));
 }
+
+/**
+ * A tab opened (or emptied) for a capture waits on about:blank until the
+ * capture listens. If starting the capture fails, load the requested page
+ * anyway instead of leaving the tab blank, unless the user already navigated
+ * it elsewhere.
+ */
+export async function loadIfStillBlank(tabId: number, url: string): Promise<void> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const current = (tab as chrome.tabs.Tab & { pendingUrl?: string }).pendingUrl || tab.url;
+    if (current === 'about:blank') await chrome.tabs.update(tabId, { url });
+  } catch {
+    // The tab may have closed; the capture failure is what gets reported.
+  }
+}

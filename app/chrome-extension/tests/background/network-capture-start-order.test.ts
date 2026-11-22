@@ -82,6 +82,57 @@ describe('network capture start with a url', () => {
     expect(stopped.data).toMatchObject({ tabUrl: TARGET, tabTitle: 'App' });
   });
 
+  it('webRequest: still loads the requested url in its new tab when capture fails to start', async () => {
+    const { networkCaptureStartTool } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-web-request'
+    );
+    vi.spyOn(networkCaptureStartTool as any, 'startCaptureForTab').mockRejectedValue(
+      new Error('network capture is limited to 4 tabs'),
+    );
+
+    const result = await networkCaptureStartTool.execute({ url: TARGET, background: true });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({ text: expect.stringContaining('limited to 4 tabs') });
+    expect(order).toEqual(['create:about:blank', `load:${TARGET}`]);
+    expect(networkCaptureStartTool.captureData.size).toBe(0);
+  });
+
+  it('webRequest: leaves a tab the user already navigated when capture fails to start', async () => {
+    const { networkCaptureStartTool } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-web-request'
+    );
+    vi.spyOn(networkCaptureStartTool as any, 'startCaptureForTab').mockRejectedValue(
+      new Error('capture failed'),
+    );
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 9,
+      url: 'about:blank',
+      pendingUrl: 'https://example.com/other',
+    } as chrome.tabs.Tab);
+
+    const result = await networkCaptureStartTool.execute({ url: TARGET, background: true });
+
+    expect(result.isError).toBe(true);
+    expect(order).toEqual(['create:about:blank']);
+  });
+
+  it('webRequest: does not navigate an explicit tab when capture fails to start', async () => {
+    tabUrl = 'https://example.com/current';
+    const { networkCaptureStartTool } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-web-request'
+    );
+    vi.spyOn(networkCaptureStartTool as any, 'startCaptureForTab').mockRejectedValue(
+      new Error('capture failed'),
+    );
+
+    const result = await networkCaptureStartTool.execute({ url: TARGET, tabId: 9, background: true });
+
+    expect(result.isError).toBe(true);
+    expect(order).toEqual([]);
+    expect(tabUrl).toBe('https://example.com/current');
+  });
+
   it('debugger: attaches before the new tab loads the url', async () => {
     const { networkDebuggerStartTool } = await import(
       '@/entrypoints/background/tools/browser/network-capture-debugger'
