@@ -10,6 +10,9 @@ import { readPageTool } from './read-page';
 const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 720;
 const NAVIGATION_POLL_MS = 100;
+// An optional renderer read must leave time for browser-side history traversal
+// even when JavaScript is suspended by DevTools or a native dialog.
+const FRAME_HISTORY_READ_TIMEOUT_MS = 250;
 const NAVIGATION_WAIT_TIMEOUT_MS = 8000;
 // Upper bound for waiting until the page finishes loading after it commits.
 const NAVIGATION_LOAD_TIMEOUT_MS = 20_000;
@@ -35,6 +38,7 @@ type FrameHistoryRead = 'back' | 'forward' | 'current';
 async function readFrameHistoryKeys(tabId: number, direction: FrameHistoryRead, signal: AbortSignal) {
   // Navigation API keys are scoped to a frame and survive same-document traversal.
   // An isolated world can read them while another client owns the debugger.
+  const readSignal = AbortSignal.any([signal, AbortSignal.timeout(FRAME_HISTORY_READ_TIMEOUT_MS)]);
   return readWithSignal(() => chrome.scripting.executeScript({
     target: { tabId, allFrames: true }, world: 'ISOLATED', injectImmediately: true,
     args: [direction],
@@ -50,7 +54,10 @@ async function readFrameHistoryKeys(tabId: number, direction: FrameHistoryRead, 
       return nav.entries().filter((entry) => direction === 'back'
         ? entry.index < current.index : entry.index > current.index).map((entry) => entry.key);
     },
-  }).catch(() => []), signal);
+  }), readSignal).catch(() => {
+    signal.throwIfAborted();
+    return [];
+  });
 }
 
 interface NavigateToolParams {
@@ -298,7 +305,8 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const current = await chrome.tabs.get(tabId);
         // Chrome can report a child traversing pushState entries without a forward_back
         // qualifier. Confirm it reached an existing joint session-history entry.
-        if (childUpdated && !childTraversed) {
+        const topTraversed = current.url && (current.url !== previousUrl || current.url === committedUrl);
+        if (!topTraversed && childUpdated && !childTraversed) {
           childUpdated = false;
           if (destinations?.size) {
             const history = await readTabHistory(tabId, signal);
@@ -312,7 +320,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             });
           }
         }
-        if (current.url && (current.url !== previousUrl || current.url === committedUrl || childTraversed)) {
+        if (topTraversed || (current.url && childTraversed)) {
           if (waitUntil === 'commit' || current.status === 'complete') return current;
           return this.waitForLoadComplete(tabId, deadline, callerSignal);
         }

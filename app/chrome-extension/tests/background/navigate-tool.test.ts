@@ -1125,6 +1125,26 @@ describe('navigateTool', () => {
     }
   });
 
+  it.each(['back', 'forward'] as const)('continues top-level %s when a paused frame never answers', async (direction) => {
+    const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockRejectedValue(new Error('Debugger in use'));
+    const executeScript = vi.fn(() => new Promise(() => {}));
+    Object.assign(chrome, {
+      scripting: { executeScript },
+      webNavigation: { getAllFrames: async () => [{ frameId: 9 }] },
+    });
+    const target = makeTab({ url: 'https://example.com/destination' });
+    const traverse = direction === 'back' ? mocks.tabsGoBack : mocks.tabsGoForward;
+    traverse.mockImplementation(async () => { mocks.tabsGet.mockResolvedValue(target); });
+    try {
+      const result = await navigateTool.execute({ url: direction });
+      expect(executeScript).toHaveBeenCalled();
+      expect(getTextPayload(result).url).toBe(target.url);
+      expect(traverse).toHaveBeenCalledOnce();
+    } finally {
+      history.mockRestore();
+    }
+  });
+
   it('cancels a stalled frame-history read without traversing after the late reply', async () => {
     const controller = new AbortController();
     const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockRejectedValue(new Error('Debugger in use'));
