@@ -143,6 +143,24 @@ describe('keyboard-helper page protocol', () => {
     }
   });
 
+  it('honors beforeinput cancellation for whole literals, deletion and single keystrokes', async () => {
+    document.body.innerHTML = '<input value="original">';
+    const field = document.querySelector('input')!;
+    field.focus();
+    const edits: unknown[] = [];
+    field.addEventListener('beforeinput', (event) => {
+      const input = event as InputEvent;
+      edits.push([input.inputType, input.data]);
+      event.preventDefault();
+    });
+    const listener = executeHelper();
+    for (const keys of ['35', 'Backspace', 'a']) expect((await sendKeys(listener, keys)).success).toBe(true);
+    expect(edits).toEqual([['insertText', '35'], ['deleteContentBackward', null], ['insertText', 'a']]);
+    expect(field.value).toBe('original');
+    field.blur();
+    expect((await sendKeys(listener, 'hello')).success).toBe(false);
+  });
+
   it('initializes once and answers the synchronous health check', async () => {
     const listener = executeHelper();
     executeHelper(false);
@@ -234,7 +252,7 @@ describe('keyboard-helper page protocol', () => {
         : await keyboardTool.execute({ keys: text, tabId: 7, background: true });
       expect(result.isError).toBe(false);
       expect(input.value).toBe(tool === 'type' ? text : 'old' + text);
-      expect(keydown).toEqual(tool === 'type' ? ['a', 'Backspace', ...text] : [...text]);
+      expect(keydown).toEqual(tool === 'type' ? ['a', 'Backspace'] : []);
     } finally {
       Reflect.deleteProperty(document, 'execCommand');
     }

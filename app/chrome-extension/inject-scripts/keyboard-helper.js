@@ -233,14 +233,36 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     }
   }
 
+  function isTextField(element) {
+    return element.isContentEditable || element.tagName === 'TEXTAREA' ||
+      (element.tagName === 'INPUT' &&
+       ['text', 'search', 'url', 'tel', 'email', 'password', 'number'].includes(element.type));
+  }
+
+  function editText(element, command, data) {
+    if (!isTextField(element) || element.readOnly || element.matches(':disabled')) {
+      throw new Error('The focused element is not editable');
+    }
+    const inputTypes = {
+      insertText: 'insertText', delete: 'deleteContentBackward',
+      forwardDelete: 'deleteContentForward', insertLineBreak: 'insertLineBreak',
+    };
+    const allowed = element.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true, composed: true, cancelable: true, inputType: inputTypes[command], data: data ?? null,
+    }));
+    if (!allowed) return;
+    if (focusedElement() !== element) throw new Error('The editing target lost focus');
+    if (!document.execCommand(command, false, data)) {
+      throw new Error('The focused element did not accept the editing command: ' + command);
+    }
+  }
+
   function applyEdit(element, key, modifiers, text) {
     if (key === 'Tab' && !modifiers.ctrlKey && !modifiers.altKey && !modifiers.metaKey) {
       moveTabFocus(element, modifiers.shiftKey);
       return;
     }
-    const isTextInput = element.tagName === 'INPUT' &&
-      ['text', 'search', 'url', 'tel', 'email', 'password', 'number'].includes(element.type);
-    if (!(isTextInput || element.tagName === 'TEXTAREA' || element.isContentEditable)) {
+    if (!isTextField(element)) {
       if (modifiers.ctrlKey || modifiers.altKey || modifiers.metaKey) return;
       const button = element.matches('button, input:is([type=button], [type=submit], [type=reset], [type=image])');
       if ((key === 'Enter' && (button || element.matches('a[href]'))) ||
@@ -282,18 +304,17 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
         command = 'insertLineBreak';
       }
     }
-    if (command && !document.execCommand(command, false, text)) {
-      throw new Error('The focused element did not accept the editing command: ' + command);
+    if (command === 'selectAll') {
+      if (!document.execCommand(command)) throw new Error('Could not select the field contents');
+    } else if (command) {
+      editText(element, command, text);
     }
   }
 
   function dispatchStep(step, element) {
     if (step.kind === 'text') {
-      for (const key of step.text) {
-        const info = { key, code: '', keyCode: 0, modifiers: {} };
-        const result = dispatchKeyEvents(info, element, () => applyEdit(element, key, {}, key));
-        if (!result.success) return result;
-      }
+      // Match Input.insertText: the editor can veto the entire literal insertion.
+      editText(element, 'insertText', step.text);
       return { success: true };
     }
     const { key: definition, modifiers: names } = step.stroke;
