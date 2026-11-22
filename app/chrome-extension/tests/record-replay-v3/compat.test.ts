@@ -1,3 +1,4 @@
+import { runInTabRequestQueue } from "@/entrypoints/background/tab-queue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -243,6 +244,33 @@ describe("record-replay-v3 compat", () => {
       actor: "runtime",
       runId: "run-1",
     });
+  });
+
+  it("holds a new tab's public request queue from readiness through the last flow step", async () => {
+    const tab = { id: 99, url: "https://example.com/flow", status: "complete" };
+    asMock(chrome.tabs.query).mockResolvedValue([]);
+    asMock(chrome.tabs.create).mockResolvedValue(tab);
+    let ready!: (value: typeof tab) => void;
+    asMock(chrome.tabs.get).mockImplementationOnce(() => new Promise(resolve => { ready = resolve; }))
+      .mockResolvedValue(tab);
+    const runtime = createRuntime();
+    let finish!: (value: { id: string; status: string }) => void;
+    runtime.storage.runs.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    const workflow = enqueueRunAndWait({ flowId: "flow-2" as any, tabTarget: "new", startUrl: tab.url });
+    await vi.waitFor(() => expect(ready).toBeTypeOf("function"));
+    const navigate = vi.fn(async () => {});
+    const competingRequest = runInTabRequestQueue(tab.id, navigate);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(navigate).not.toHaveBeenCalled();
+    ready(tab);
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    expect(navigate).not.toHaveBeenCalled();
+    finish({ id: "run-1", status: "succeeded" });
+    expect((await workflow).run.status).toBe("succeeded");
+    await competingRequest;
+    expect(navigate).toHaveBeenCalledOnce();
   });
 
   it("creates a new tab for explicit new-tab execution before enqueueing the run", async () => {

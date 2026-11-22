@@ -109,7 +109,7 @@ describe('resolveRunTargetTab background mode', () => {
     expect(tabsUpdate).not.toHaveBeenCalled();
   });
 
-  it('closes a newly owned run tab when target resolution is cancelled', async () => {
+  it.each([false, true])('releases a newly owned tab on cancellation (stalled read: %s)', async (stalled) => {
     tabsQuery.mockResolvedValueOnce([tab()]).mockResolvedValueOnce([tab()]);
     tabsCreate.mockResolvedValue(
       tab({
@@ -127,6 +127,7 @@ describe('resolveRunTargetTab background mode', () => {
         url: 'https://example.com/new',
       }),
     );
+    if (stalled) tabsGet.mockImplementation(() => new Promise(() => {}));
     tabsRemove.mockResolvedValue(undefined);
     const controller = new AbortController();
 
@@ -136,7 +137,7 @@ describe('resolveRunTargetTab background mode', () => {
       execution: { backgroundTabs: true },
       signal: controller.signal,
     });
-    await vi.waitFor(() => expect(tabsCreate).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(tabsGet).toHaveBeenCalled());
     controller.abort();
 
     await expect(resolution).rejects.toMatchObject({ name: 'AbortError' });

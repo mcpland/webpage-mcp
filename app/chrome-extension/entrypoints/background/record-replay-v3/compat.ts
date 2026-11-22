@@ -24,7 +24,7 @@ import { validateReachableRuntimeNodes } from "./flows/runtime-validation";
 import { convertCompatFlowToV3 as convertCompatFlowDocumentToV3 } from "./storage/import/flow-convert";
 import { validateFlow } from "./storage/flows";
 import {
-  resolveRunTargetTab,
+  withRunTargetTab,
   type RunTargetPreference,
 } from "./run-target";
 import type { ExecutionFlags } from "@/entrypoints/background/replay-actions";
@@ -570,7 +570,7 @@ export function buildCompatRunResult(
   };
 }
 
-export async function enqueueRunAndWait(input: {
+interface CompatRunInput {
   flowId: FlowId;
   expectedRevision?: string;
   tabId?: number;
@@ -584,17 +584,19 @@ export async function enqueueRunAndWait(input: {
   endNodeId?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
-}): Promise<{ run: RunRecordV3; events: RunEvent[]; result: RunResult }> {
+}
+
+export async function enqueueRunAndWait(input: CompatRunInput) {
   throwIfRunAborted(input.signal);
   const runtime = await ensureV3Runtime();
-  const resolvedTabId = await resolveRunTargetTab({
-    tabId: input.tabId,
-    tabTarget: input.tabTarget,
-    startUrl: input.startUrl,
-    refresh: input.refresh,
-    execution: input.execution,
-    signal: input.signal,
-  });
+  return withRunTargetTab(input, (tabId) => enqueueResolvedRunAndWait(input, runtime, tabId));
+}
+
+async function enqueueResolvedRunAndWait(
+  input: CompatRunInput,
+  runtime: V3Runtime,
+  resolvedTabId: number,
+): Promise<{ run: RunRecordV3; events: RunEvent[]; result: RunResult }> {
   throwIfRunAborted(input.signal);
   const { runId } = await enqueueRun(
     {
@@ -648,6 +650,9 @@ export async function enqueueRunAndWait(input: {
     throw error;
   }
 
+  if (input.tabTarget === "new" && input.tabId === undefined) {
+    await cancelRunAfterAbort(runtime, runId as RunId);
+  }
   throw new Error(`Run "${runId}" did not finish within ${timeoutMs}ms`);
 }
 

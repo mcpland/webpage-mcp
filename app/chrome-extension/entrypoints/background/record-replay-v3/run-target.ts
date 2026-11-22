@@ -1,3 +1,5 @@
+import { readWithSignal } from "@/utils/read-with-signal";
+import { runInTabRequestQueue } from "../tab-queue";
 import {
   enforcesPublicPageRestrictions,
   isAllowedPublicFlowTabUrl,
@@ -86,13 +88,14 @@ async function waitForTabReady(
 ): Promise<chrome.tabs.Tab> {
   throwIfTargetAborted(options.signal);
   const deadline = Date.now() + TAB_RESOLUTION_WAIT_TIMEOUT_MS;
-  let lastSeen = await chrome.tabs.get(tabId);
+  const readTab = () => readWithSignal(() => chrome.tabs.get(tabId), options.signal);
+  let lastSeen = await readTab();
   throwIfTargetAborted(options.signal);
   let sawNavigationSignal = false;
 
   while (Date.now() < deadline) {
     throwIfTargetAborted(options.signal);
-    const current = await chrome.tabs.get(tabId);
+    const current = await readTab();
     throwIfTargetAborted(options.signal);
     lastSeen = current;
     const pendingUrl =
@@ -166,6 +169,13 @@ async function createFallbackRunTab(
 export async function resolveRunTargetTab(
   input: RunTargetOptions,
 ): Promise<number | undefined> {
+  return withRunTargetTab(input, async (id) => id);
+}
+
+export async function withRunTargetTab<T>(
+  input: RunTargetOptions,
+  run: (tabId: number) => Promise<T>,
+): Promise<T> {
   throwIfTargetAborted(input.signal);
   const explicitTabId = isFiniteNumber(input.tabId)
     ? Math.floor(input.tabId)
@@ -207,7 +217,7 @@ export async function resolveRunTargetTab(
       if (enforcesPublicPageRestrictions(input.execution)) {
         throw new Error(PUBLIC_FLOW_RUN_TARGET_ERROR);
       }
-      return createFallbackRunTab(background, input.signal);
+      return run(await createFallbackRunTab(background, input.signal));
     } else if (shouldRefresh && isWebUrl(explicitTab.url, input.execution)) {
       throwIfTargetAborted(input.signal);
       await chrome.tabs.reload(explicitTab.id);
@@ -216,7 +226,7 @@ export async function resolveRunTargetTab(
         signal: input.signal,
       });
     }
-    return explicitTab.id;
+    return run(explicitTab.id);
   }
 
   const currentWindowTabsRaw = await chrome.tabs.query({ currentWindow: true });
@@ -247,19 +257,21 @@ export async function resolveRunTargetTab(
     if (created.id === undefined) {
       throw new Error("chrome.tabs.create returned a tab without id");
     }
-    try {
-      await waitForTabReady(created.id, {
-        previousUrl: activeTab?.url || undefined,
-        targetUrl: urlToOpen,
-        signal: input.signal,
-      });
-      return created.id;
-    } catch (error) {
-      if (input.signal?.aborted) {
-        await chrome.tabs.remove(created.id).catch(() => {});
+    const tabId = created.id;
+    // Reserve the newly allocated tab before its first readiness poll.
+    return runInTabRequestQueue(tabId, async () => {
+      try {
+        await waitForTabReady(tabId, {
+          previousUrl: activeTab?.url || undefined,
+          targetUrl: urlToOpen,
+          signal: input.signal,
+        });
+      } catch (error) {
+        if (input.signal?.aborted) await chrome.tabs.remove(tabId).catch(() => {});
+        throw error;
       }
-      throw error;
-    }
+      return run(tabId);
+    });
   }
 
   let targetTab: chrome.tabs.Tab | null =
@@ -296,7 +308,7 @@ export async function resolveRunTargetTab(
         targetUrl: startUrl,
         signal: input.signal,
       });
-      return targetTab.id;
+      return run(targetTab.id);
     }
 
     throwIfTargetAborted(input.signal);
@@ -309,7 +321,7 @@ export async function resolveRunTargetTab(
         targetUrl: startUrl,
         signal: input.signal,
       });
-      return created.id;
+      return run(created.id);
     } catch (error) {
       if (input.signal?.aborted) {
         await chrome.tabs.remove(created.id).catch(() => {});
@@ -323,7 +335,7 @@ export async function resolveRunTargetTab(
       if (enforcesPublicPageRestrictions(input.execution)) {
         throw new Error(PUBLIC_FLOW_RUN_TARGET_ERROR);
       }
-      return createFallbackRunTab(background, input.signal);
+      return run(await createFallbackRunTab(background, input.signal));
     }
     if (shouldRefresh && isWebUrl(targetTab.url, input.execution)) {
       throwIfTargetAborted(input.signal);
@@ -333,8 +345,8 @@ export async function resolveRunTargetTab(
         signal: input.signal,
       });
     }
-    return targetTab.id;
+    return run(targetTab.id);
   }
 
-  return createFallbackRunTab(background, input.signal);
+  return run(await createFallbackRunTab(background, input.signal));
 }
