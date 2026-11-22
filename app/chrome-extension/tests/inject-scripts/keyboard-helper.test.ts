@@ -106,6 +106,25 @@ describe('keyboard-helper page protocol', () => {
     expect(submitters).toEqual([button, null]);
   });
 
+  it('moves focus in tab order and sends later keys to the new focus', async () => {
+    document.body.innerHTML = '<input id="a" tabindex="1"><input disabled><input hidden><input id="b" tabindex="2">';
+    const a = document.querySelector<HTMLElement>('#a')!;
+    const b = document.querySelector<HTMLElement>('#b')!;
+    const atB = vi.fn();
+    b.addEventListener('keydown', atB);
+    a.focus();
+    const listener = executeHelper();
+    expect((await sendKeys(listener, 'Tab,Escape')).success).toBe(true);
+    expect(document.activeElement).toBe(b);
+    expect(atB.mock.calls[0][0].key).toBe('Escape');
+    expect((await sendKeys(listener, 'Shift+Tab')).success).toBe(true);
+    expect(document.activeElement).toBe(a);
+    const atA = vi.fn();
+    a.addEventListener('keydown', atA);
+    expect((await sendKeys(listener, 'Shift+Tab,Escape')).success).toBe(false);
+    expect(atA).toHaveBeenCalledTimes(1);
+  });
+
   it('initializes once and answers the synchronous health check', async () => {
     const listener = executeHelper();
     executeHelper(false);

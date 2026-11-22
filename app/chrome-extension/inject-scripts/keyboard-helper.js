@@ -164,7 +164,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       try {
         if (allowEdit) edit?.();
       } finally {
-        element.dispatchEvent(new KeyboardEvent('keyup', eventOptions));
+        focusedElement().dispatchEvent(new KeyboardEvent('keyup', eventOptions));
       }
       return { success: true };
     } catch (error) {
@@ -173,6 +173,46 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
         success: false,
         error: `Error dispatching key events for "${key}": ${error.message}`,
       };
+    }
+  }
+
+  function focusedElement() {
+    let element = document.activeElement || document.body;
+    while (element.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
+    return element;
+  }
+
+  function moveTabFocus(element, backward) {
+    const root = element.getRootNode();
+    // A shadow host or frame is a focus-navigation boundary. Don't skip it
+    // and apply subsequent keys to an unrelated control in this document.
+    const candidates = Array.from(root.querySelectorAll('*')).filter((node) => {
+      if (!(node instanceof HTMLElement) || node.closest('[inert], [hidden]') ||
+          node.matches(':disabled, input[type=hidden]')) return false;
+      if (node.checkVisibility && !node.checkVisibility({ visibilityProperty: true })) return false;
+      return node.tabIndex >= 0 || (!node.hasAttribute('tabindex') &&
+        (node.shadowRoot || node.isContentEditable && !node.parentElement?.isContentEditable));
+    });
+    const stops = candidates.filter((node) => {
+      if (!node.matches('input[type=radio]') || !node.name) return true;
+      const group = candidates.filter((other) => other.type === 'radio' &&
+        other.name === node.name && other.form === node.form);
+      return node === (group.find((radio) => radio.checked) ||
+        (backward ? group[group.length - 1] : group[0]));
+    });
+    const rank = (node) => node.tabIndex > 0 ? node.tabIndex : Infinity;
+    stops.sort((a, b) => rank(a) - rank(b));
+    const index = stops.indexOf(element);
+    const next = index < 0 && element === document.body
+      ? stops[backward ? stops.length - 1 : 0]
+      : index >= 0 && stops[index + (backward ? -1 : 1)];
+    if (!next || next.matches('iframe, frame, object, embed') || next.shadowRoot) {
+      throw new Error('Tab leaves the available focus scope; use an explicit element ref');
+    }
+    next.focus();
+    if (focusedElement() !== next) throw new Error('The next control did not receive focus');
+    if (next.matches('input:is([type=text], [type=search], [type=url], [type=tel], [type=password], :not([type]))')) {
+      next.select();
     }
   }
 
@@ -194,6 +234,10 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
   }
 
   function applyEdit(element, key, modifiers, text) {
+    if (key === 'Tab' && !modifiers.ctrlKey && !modifiers.altKey && !modifiers.metaKey) {
+      moveTabFocus(element, modifiers.shiftKey);
+      return;
+    }
     const isTextInput = element.tagName === 'INPUT' &&
       ['text', 'search', 'url', 'tel', 'email', 'password', 'number'].includes(element.type);
     if (!(isTextInput || element.tagName === 'TEXTAREA' || element.isContentEditable)) {
@@ -251,9 +295,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
    */
   async function simulateKeyboard(keysSequenceString, targetElement = null, delay = 0, steps) {
     try {
-      let element = targetElement || document.activeElement || document.body;
-      while (!targetElement && element.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
-
+      const element = targetElement || focusedElement();
       if (element !== document.activeElement && typeof element.focus === 'function') {
         element.focus();
         await new Promise((resolve) => setTimeout(resolve, 50)); // Small delay for focus
@@ -269,7 +311,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
         const step = keyCombinations[i];
         const comboString = steps ? (step.token ?? step.text) : step;
         const dispatchResult = steps
-          ? dispatchStep(step, element)
+          ? dispatchStep(step, focusedElement())
           : dispatchKeyEvents(parseSingleKeyCombination(comboString), element);
         operationResults.push({
           keyCombination: comboString,
