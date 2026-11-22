@@ -111,11 +111,12 @@ const scenarios = {
     const childRef = findRef(childRead.json?.pageContent, /CHILD INPUT/);
     assert.match(String(childRef), /^f\d+:ref_\d+$/, childRead.text);
 
-    await t.call("chrome_fill_or_select", {
+    const fillChild = await t.call("chrome_fill_or_select", {
       tabId,
       ref: childRef,
       value: "in-child",
     });
+    assert.ok(fillChild.ok, fillChild.text);
     assert.ok(
       await t.pageLog(
         "/frame-child",
@@ -123,11 +124,12 @@ const scenarios = {
         (d) => d.value === "in-child",
       ),
     );
-    await t.call("chrome_fill_or_select", {
+    const fillMain = await t.call("chrome_fill_or_select", {
       tabId,
       ref: mainRef,
       value: "in-main",
     });
+    assert.ok(fillMain.ok, fillMain.text);
     assert.ok(
       await t.pageLog("/frames", "main-input", (d) => d.value === "in-main"),
     );
@@ -141,30 +143,34 @@ const scenarios = {
 
   async keyboard(t) {
     const tabId = await t.open("/form");
-    await t.call("chrome_fill_or_select", {
+    const filled = await t.call("chrome_fill_or_select", {
       tabId,
       selector: "#email",
       value: "abc",
     });
+    assert.ok(filled.ok, filled.text);
     const emailRef = findRef(await t.tree(tabId), /id="email"/);
-    await t.call("chrome_computer", {
+    const backspace = await t.call("chrome_computer", {
       tabId,
       action: "key",
       ref: emailRef,
       text: "Backspace",
     });
+    assert.ok(backspace.ok, backspace.text);
     assert.equal(await t.value(tabId, "#email"), "ab");
-    await t.call("chrome_keyboard", {
+    const typed = await t.call("chrome_keyboard", {
       tabId,
       selector: "#bio",
       keys: "Hello World",
     });
+    assert.ok(typed.ok, typed.text);
     assert.equal(await t.value(tabId, "#bio"), "Hello World");
-    await t.call("chrome_keyboard", {
+    const cleared = await t.call("chrome_keyboard", {
       tabId,
       selector: "#bio",
       keys: "Ctrl+A Backspace",
     });
+    assert.ok(cleared.ok, cleared.text);
     assert.equal(await t.value(tabId, "#bio"), "");
   },
 
@@ -255,6 +261,7 @@ const scenarios = {
       waitForDownload: true,
     });
     assert.ok(click.ok, click.text);
+    assert.equal(click.json?.download?.state, "complete", click.text);
     assert.match(
       String(click.json?.download?.filename),
       /report.*\.txt$/,
@@ -310,12 +317,18 @@ const scenarios = {
     assert.ok(capture.ok, capture.text);
     assert.notEqual(capture.json?.redacted, true, capture.text);
     assert.match(String(capture.json?.tabUrl), /\/polling$/);
-    const urls = (capture.json?.requests ?? []).map((request) =>
-      String(request.url),
+    const requests = capture.json?.requests ?? [];
+    const firstPing = requests.find((request) =>
+      String(request.url).endsWith("/api/ping?i=0"),
     );
     assert.ok(
-      urls.some((url) => url.endsWith("/api/ping?i=0")),
-      urls.join("\n"),
+      firstPing,
+      requests.map((request) => String(request.url)).join("\n"),
+    );
+    assert.match(
+      String(firstPing.responseBody ?? ""),
+      /"pong"\s*:\s*0/,
+      JSON.stringify(firstPing),
     );
   },
 
@@ -394,16 +407,21 @@ const scenarios = {
 
   async "console-snapshot-wait"(t) {
     const tabId = await t.open("/simple");
-    await t.call("chrome_javascript", {
+    const logged = await t.call("chrome_javascript", {
       tabId,
       code: 'console.error("logged before the snapshot"); return true',
     });
+    assert.ok(logged.ok, logged.text);
     const snapshot = await t.call("chrome_console", { tabId, waitMs: 0 });
+    assert.ok(snapshot.ok, snapshot.text);
     assert.ok(
       snapshot.text.includes("logged before the snapshot"),
       snapshot.text,
     );
-    assert.ok(snapshot.ms < 1500, `waitMs=0 returned in ${snapshot.ms}ms`);
+    assert.ok(
+      (snapshot.json?.totalDurationMs ?? snapshot.ms) < 1500,
+      `waitMs=0 took ${snapshot.json?.totalDurationMs ?? snapshot.ms}ms (wall ${snapshot.ms}ms)`,
+    );
   },
 
   async toolset(t) {
@@ -505,11 +523,50 @@ async function main() {
   const env = prepareEnvironment({
     extensionDir: process.env.WEBPAGE_MCP_EXTENSION_DIR || undefined,
   });
-  const fixtures = await startFixtureServer();
+  const keepTempDir = argv.includes("--keep");
+  const removeTempDir = () => {
+    if (keepTempDir) {
+      console.log(`\nKept ${env.root}`);
+      return;
+    }
+    try {
+      fs.rmSync(env.root, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 200,
+      });
+    } catch (error) {
+      // Leftover temp files must not turn a passing run into a failure.
+      console.warn(`Could not remove ${env.root}: ${error.message}`);
+    }
+  };
+
+  let fixtures;
   let chrome;
   let client;
   const results = [];
+  let fatalError;
+  let cleanedUp = false;
+  const cleanupResources = async () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    await client?.close().catch(() => {});
+    if (chrome) await stopChrome(chrome.child).catch(() => {});
+    if (fixtures) await fixtures.close().catch(() => {});
+  };
+  const onSignal = (signal) => {
+    console.error(`\nReceived ${signal}, cleaning up...`);
+    void cleanupResources().finally(() => {
+      removeTempDir();
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    });
+  };
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+
   try {
+    fixtures = await startFixtureServer();
     chrome = await launchChrome(env, {
       chromeBinary,
       headless: !argv.includes("--headful"),
@@ -540,37 +597,31 @@ async function main() {
         );
       }
     }
+  } catch (error) {
+    fatalError = error;
+    console.error(String(error?.stack || error));
   } finally {
-    await client?.close().catch(() => {});
-    if (chrome) await stopChrome(chrome.child);
-    await fixtures.close();
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    await cleanupResources();
+
+    const failed = results.filter((result) => !result.ok);
+    if (results.length > 0) {
+      console.log(
+        `\n${results.length - failed.length}/${results.length} scenarios passed`,
+      );
+    }
+    if (fatalError || failed.length > 0) {
+      console.log(`\nnative host log (tail):\n${tail(env.nativeHostLog)}`);
+      console.log(
+        `\nChrome stderr (tail):\n${chrome?.stderr().split("\n").slice(-20).join("\n") ?? "(no Chrome output)"}`,
+      );
+    }
+    removeTempDir();
   }
 
   const failed = results.filter((result) => !result.ok);
-  console.log(
-    `\n${results.length - failed.length}/${results.length} scenarios passed`,
-  );
-  if (failed.length > 0) {
-    console.log(`\nnative host log (tail):\n${tail(env.nativeHostLog)}`);
-    console.log(
-      `\nChrome stderr (tail):\n${chrome?.stderr().split("\n").slice(-20).join("\n")}`,
-    );
-  }
-  if (argv.includes("--keep")) console.log(`\nKept ${env.root}`);
-  else {
-    try {
-      fs.rmSync(env.root, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 200,
-      });
-    } catch (error) {
-      // Leftover temp files must not turn a passing run into a failure.
-      console.warn(`Could not remove ${env.root}: ${error.message}`);
-    }
-  }
-  return failed.length > 0 ? 1 : 0;
+  return fatalError || failed.length > 0 ? 1 : 0;
 }
 
 process.exitCode = await main();

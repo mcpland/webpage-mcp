@@ -141,6 +141,10 @@ export async function launchChrome(env, { chromeBinary, headless = true }) {
   const child = spawn(chromeBinary, args, {
     stdio: ["ignore", "pipe", "pipe"],
   });
+  let spawnError;
+  child.on("error", (error) => {
+    spawnError = error;
+  });
   let stderr = "";
   child.stderr.on(
     "data",
@@ -151,15 +155,27 @@ export async function launchChrome(env, { chromeBinary, headless = true }) {
   const portFile = path.join(env.profile, "DevToolsActivePort");
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null)
-      throw new Error(`Chrome exited early:\n${stderr}`);
+    if (spawnError) {
+      throw new Error(`Failed to spawn Chrome (${chromeBinary}): ${spawnError.message}`);
+    }
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(
+        `Chrome exited early (code=${child.exitCode}, signal=${child.signalCode}):\n${stderr}`,
+      );
+    }
     if (fs.existsSync(portFile)) {
-      const port = Number(fs.readFileSync(portFile, "utf8").split("\n")[0]);
-      if (port > 0) return { child, port, stderr: () => stderr };
+      const lines = fs
+        .readFileSync(portFile, "utf8")
+        .split(/\r?\n/)
+        .filter(Boolean);
+      const port = Number(lines[0]);
+      if (Number.isInteger(port) && port > 0 && lines.length >= 2 && lines[1].startsWith("/")) {
+        return { child, port, stderr: () => stderr };
+      }
     }
     await sleep(100);
   }
-  child.kill("SIGKILL");
+  await stopChrome(child, 5_000);
   throw new Error(`Chrome did not report a DevTools port:\n${stderr}`);
 }
 
@@ -305,7 +321,21 @@ export async function connectMcpClient(env, extraEnv = {}) {
     { name: "webpage-mcp-browser-e2e", version: "1.0.0" },
     { capabilities: {} },
   );
-  await client.connect(transport);
+  let stderr = "";
+  transport.stderr?.on("data", (chunk) => {
+    stderr = (stderr + String(chunk)).slice(-20_000);
+  });
+  try {
+    await client.connect(transport);
+  } catch (error) {
+    await transport.close().catch(() => {});
+    if (stderr) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}\nMCP server stderr:\n${stderr}`,
+      );
+    }
+    throw error;
+  }
   return client;
 }
 
