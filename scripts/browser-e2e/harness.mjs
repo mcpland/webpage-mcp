@@ -163,6 +163,22 @@ export async function launchChrome(env, { chromeBinary, headless = true }) {
   throw new Error(`Chrome did not report a DevTools port:\n${stderr}`);
 }
 
+/**
+ * Stop Chrome and wait until it has exited: it keeps writing to its profile
+ * while shutting down, so removing the profile right after SIGTERM races it.
+ */
+export async function stopChrome(child, timeoutMs = 10_000) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGTERM");
+  const forceKill = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+  try {
+    await exited;
+  } finally {
+    clearTimeout(forceKill);
+  }
+}
+
 async function cdpConnect(webSocketUrl) {
   const socket = new globalThis.WebSocket(webSocketUrl);
   await new Promise((resolve, reject) => {

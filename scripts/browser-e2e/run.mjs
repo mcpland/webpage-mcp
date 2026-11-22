@@ -22,6 +22,7 @@ import {
   launchChrome,
   prepareEnvironment,
   routeDownloads,
+  stopChrome,
   waitFor,
 } from "./harness.mjs";
 
@@ -459,7 +460,7 @@ async function main() {
     }
   } finally {
     await client?.close().catch(() => {});
-    chrome?.child.kill("SIGTERM");
+    if (chrome) await stopChrome(chrome.child);
     await fixtures.close();
   }
 
@@ -474,7 +475,19 @@ async function main() {
     );
   }
   if (argv.includes("--keep")) console.log(`\nKept ${env.root}`);
-  else fs.rmSync(env.root, { recursive: true, force: true });
+  else {
+    try {
+      fs.rmSync(env.root, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 200,
+      });
+    } catch (error) {
+      // Leftover temp files must not turn a passing run into a failure.
+      console.warn(`Could not remove ${env.root}: ${error.message}`);
+    }
+  }
   return failed.length > 0 ? 1 : 0;
 }
 
