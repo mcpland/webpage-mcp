@@ -23,6 +23,11 @@ export const DIALOG_GRACE_MS = 150;
 const DIALOG_ANSWER_TIMEOUT_MS = 5000;
 const INPUT_SETTLE_TIMEOUT_MS = 5000;
 const MAX_CHAINED_DIALOGS = 3;
+export const RESPONSIVENESS_PROBE_TIMEOUT_MS = 1500;
+/** How quickly a page that just resumed must answer before it counts as blocked. */
+const FOLLOW_UP_PROBE_TIMEOUT_MS = 500;
+/** Upper bound for a blocking dialog's opening event to arrive. */
+const FOLLOW_UP_EVENT_WAIT_MS = 3000;
 
 export class PageUnresponsiveError extends Error {
   constructor() {
@@ -72,6 +77,47 @@ export async function sendTimedDialogCommand(
   } finally {
     controller.abort();
   }
+}
+
+/** True when the page's main thread still answers the debugger. */
+export async function isPageResponsive(
+  tabId: number,
+  timeoutMs = RESPONSIVENESS_PROBE_TIMEOUT_MS,
+): Promise<boolean> {
+  try {
+    await sendTimedDialogCommand(
+      tabId,
+      'Runtime.evaluate',
+      { expression: '1', returnByValue: true },
+      timeoutMs,
+      'Page responsiveness probe',
+    );
+    return true;
+  } catch (error) {
+    return !isTimeoutError(error);
+  }
+}
+
+/**
+ * After a dialog was answered, wait for the dialog the page may open next
+ * (a confirm followed by an alert). Chrome can report that dialog well after
+ * it blocked the page (headless Chrome took ~500ms), longer than any fixed
+ * grace. A page that stops answering right after it resumed is showing it,
+ * so its event is awaited instead of leaving the page blocked and unobserved.
+ */
+export async function waitForFollowUpDialog(
+  tabId: number,
+  next: Promise<PendingDialog>,
+  graceMs: number,
+): Promise<PendingDialog | null> {
+  const early = await Promise.race([next, sleep(graceMs).then(() => null)]);
+  if (early) return early;
+  return Promise.race([
+    next,
+    isPageResponsive(tabId, FOLLOW_UP_PROBE_TIMEOUT_MS).then((responsive) =>
+      responsive ? null : Promise.race([next, sleep(FOLLOW_UP_EVENT_WAIT_MS).then(() => null)]),
+    ),
+  ]);
 }
 
 export function isTimeoutError(error: unknown): boolean {
@@ -167,11 +213,13 @@ export async function runCdpInputWithDialogs(
       await answerDialog(tabId, options.dialog, dialog);
       answered.push(outcome(dialog, options.dialog.action));
       watcher = dialogTracker.waitForDialog(tabId);
+      const next = watcher.promise;
       dialog = await Promise.race([
-        watcher.promise,
-        withTimeout(inputDone, INPUT_SETTLE_TIMEOUT_MS, 'Input dispatch')
-          .then(() => sleep(graceMs), () => undefined)
-          .then(() => null),
+        next,
+        withTimeout(inputDone, INPUT_SETTLE_TIMEOUT_MS, 'Input dispatch').then(
+          () => waitForFollowUpDialog(tabId, next, graceMs),
+          () => null,
+        ),
       ]);
     }
     return answered.length > 1
