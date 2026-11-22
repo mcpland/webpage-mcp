@@ -77,6 +77,22 @@ describe('keyboard-helper page protocol', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it('activates a checkbox after Space is released and lets the page cancel keyup', async () => {
+    document.body.innerHTML = '<input type="checkbox">';
+    const box = document.querySelector('input')!;
+    box.focus();
+    const events: string[] = [];
+    box.addEventListener('keyup', () => events.push('keyup'));
+    box.addEventListener('click', () => events.push('click'));
+    const listener = executeHelper();
+    box.addEventListener('keyup', (event) => event.preventDefault(), { once: true });
+    expect((await sendKeys(listener, 'Space')).success).toBe(true);
+    expect(box.checked).toBe(false);
+    await sendKeys(listener, 'Space');
+    expect(box.checked).toBe(true);
+    expect(events).toEqual(['keyup', 'keyup', 'click']);
+  });
+
   it('obeys the first submit button and preserves its click and submitter', async () => {
     document.body.innerHTML = '<button form="f" disabled>Save</button><form id="f"><input><button>Other</button></form>';
     const button = document.querySelector('button')!;

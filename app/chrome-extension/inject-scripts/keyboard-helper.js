@@ -39,6 +39,9 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     ),
   };
 
+  const BUTTON_SELECTOR = 'button, input:is([type=button], [type=submit], [type=reset], [type=image])';
+  const SPACE_CONTROL_SELECTOR = BUTTON_SELECTOR + ', input:is([type=checkbox], [type=radio])';
+
   const MODIFIER_KEYS = {
     ctrl: 'ctrlKey',
     control: 'ctrlKey',
@@ -161,11 +164,18 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
         allowEdit = element.dispatchEvent(new KeyboardEvent('keypress', keypressOptions));
       }
 
+      const activateOnRelease = key === ' ' && element.matches(SPACE_CONTROL_SELECTOR);
+      let releaseAllowed;
       try {
         if (Date.now() >= deadline) throw new Error('Keyboard operation expired');
-        if (allowEdit) edit?.();
+        if (allowEdit && !activateOnRelease) edit?.();
       } finally {
-        focusedElement().dispatchEvent(new KeyboardEvent('keyup', eventOptions));
+        const releaseTarget = focusedElement();
+        releaseAllowed = releaseTarget.dispatchEvent(new KeyboardEvent('keyup', eventOptions)) && releaseTarget === element;
+      }
+      if (activateOnRelease && allowEdit && releaseAllowed && focusedElement() === element) {
+        if (Date.now() >= deadline) throw new Error('Keyboard operation expired');
+        edit?.();
       }
       return { success: true };
     } catch (error) {
@@ -266,9 +276,8 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     }
     if (!isTextField(element)) {
       if (modifiers.ctrlKey || modifiers.altKey || modifiers.metaKey) return;
-      const button = element.matches('button, input:is([type=button], [type=submit], [type=reset], [type=image])');
-      if ((key === 'Enter' && (button || element.matches('a[href]'))) ||
-          (key === ' ' && (button || element.matches('input:is([type=checkbox], [type=radio])')))) {
+      if ((key === 'Enter' && element.matches(BUTTON_SELECTOR + ', a[href]')) ||
+          (key === ' ' && element.matches(SPACE_CONTROL_SELECTOR))) {
         element.click();
       }
       return;
