@@ -81,6 +81,9 @@ const PAGES = {
     LOGGER,
   ),
 
+  "/sibling-frames": page("Siblings", '<iframe id="first" src="/frame-button"></iframe><iframe id="second" src="/frame-button"></iframe>'),
+  "/frame-button": page("Button", '<button id="hit" onclick="this.textContent+=1">click</button>'),
+
   "/frame-child": page(
     "Child",
     `<input id="child-input" placeholder="CHILD INPUT" />

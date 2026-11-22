@@ -3,6 +3,7 @@
  * Locate DOM elements using selector candidate list
  */
 
+import { resolveLookupFrame } from './frame-identity';
 import { TOOL_MESSAGE_TYPES } from '../../common/message-types';
 import {
   composeCompositeSelector,
@@ -31,7 +32,7 @@ interface EnsureRefForSelectorRequest {
 }
 
 type EnsureRefForSelectorResponse =
-  | { success: true; ref: string; center: Point; href?: string }
+  | { success: true; ref: string; center: Point; href?: string; lookupId?: string }
   | { success: false; error?: string; cancelled?: boolean };
 
 interface ResolveRefRequest {
@@ -95,7 +96,7 @@ function parseEnsureRefResponse(value: unknown): EnsureRefForSelectorResponse | 
   if (value.success) {
     if (typeof value.ref !== 'string' || !isPoint(value.center)) return null;
     const href = typeof value.href === 'string' ? value.href : undefined;
-    return { success: true, ref: value.ref, center: value.center, href };
+    return { success: true, ref: value.ref, center: value.center, href, lookupId: typeof value.lookupId === 'string' ? value.lookupId : undefined };
   }
 
   const error = typeof value.error === 'string' ? value.error : undefined;
@@ -219,34 +220,20 @@ function ariaToCssSelectors(role: string | undefined, name: string | undefined):
 export class SelectorLocator {
   constructor(private readonly transport: SelectorLocatorTransport) {}
 
-  private async mapHrefToFrameId(
-    tabId: number,
-    href: string | undefined,
-  ): Promise<number | undefined> {
-    if (!href || !this.transport.getAllFrames) return undefined;
-    try {
-      const frames = await this.transport.getAllFrames(tabId);
-      const match = frames.find((f) => f.url === href);
-      return match?.frameId;
-    } catch {
-      return undefined;
-    }
-  }
-
   private async ensureRef(
     tabId: number,
     request: EnsureRefForSelectorRequest,
     frameId: number | undefined,
-  ): Promise<{ ref: string; center: Point; href?: string } | null> {
+  ): Promise<{ ref: string; center: Point; href?: string; lookupId?: string } | null> {
     const selector = request.selector ?? '';
     const responseRaw = await this.transport.sendMessage(
       tabId,
       request,
-      isCompositeSelector(selector) ? undefined : { frameId },
+      isCompositeSelector(selector) ? { frameId: 0 } : { frameId },
     );
     const parsed = parseEnsureRefResponse(responseRaw);
     if (!parsed || !parsed.success) return null;
-    return { ref: parsed.ref, center: parsed.center, href: parsed.href };
+    return { ref: parsed.ref, center: parsed.center, href: parsed.href, lookupId: parsed.lookupId };
   }
 
   private async resolveRef(
@@ -318,7 +305,7 @@ export class SelectorLocator {
         options.frameId,
       );
       if (ensured) {
-        const mappedFrameId = await this.mapHrefToFrameId(tabId, ensured.href);
+        const mappedFrameId = await resolveLookupFrame(tabId, ensured, this.transport.getAllFrames);
         const resolvedFrameId = mappedFrameId ?? options.frameId;
 
         // Fingerprint verification: If there is no match, skip it and continue trying other candidates.
@@ -408,7 +395,7 @@ export class SelectorLocator {
       );
       if (!ensured) return null;
 
-      const mappedFrameId = await this.mapHrefToFrameId(tabId, ensured.href);
+      const mappedFrameId = await resolveLookupFrame(tabId, ensured, this.transport.getAllFrames);
       return {
         ref: ensured.ref,
         center: ensured.center,
@@ -436,7 +423,7 @@ export class SelectorLocator {
       );
       if (!ensured) return null;
 
-      const mappedFrameId = await this.mapHrefToFrameId(tabId, ensured.href);
+      const mappedFrameId = await resolveLookupFrame(tabId, ensured, this.transport.getAllFrames);
       return {
         ref: ensured.ref,
         center: ensured.center,
@@ -467,7 +454,7 @@ export class SelectorLocator {
         );
         if (!ensured) continue;
 
-        const mappedFrameId = await this.mapHrefToFrameId(tabId, ensured.href);
+        const mappedFrameId = await resolveLookupFrame(tabId, ensured, this.transport.getAllFrames);
         return {
           ref: ensured.ref,
           center: ensured.center,
@@ -503,7 +490,7 @@ export class SelectorLocator {
 
     if (!ensured) return null;
 
-    const mappedFrameId = await this.mapHrefToFrameId(tabId, ensured.href);
+    const mappedFrameId = await resolveLookupFrame(tabId, ensured, this.transport.getAllFrames);
     return {
       ref: ensured.ref,
       center: ensured.center,

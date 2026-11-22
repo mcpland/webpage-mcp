@@ -1,3 +1,4 @@
+import { resolveLookupFrame } from '@/shared/selector/frame-identity';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TargetLocator, SelectorCandidate } from './types';
 
@@ -64,7 +65,7 @@ async function ensureRefForSelector(
       ensured = await sendToTab(tabId, {
         action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
         selector,
-      });
+      }, 0);
     } else {
       ensured = await sendToTab(
         tabId,
@@ -73,15 +74,7 @@ async function ensureRefForSelector(
       );
     }
     if (!ensured || !ensured.success || !ensured.ref || !ensured.center) return null;
-    // Map frameId when composite via returned href
-    let locFrameId: number | undefined = undefined;
-    if (isCompositeSelector(selector) && ensured.href) {
-      try {
-        const frames = (await chrome.webNavigation.getAllFrames({ tabId })) as any[];
-        const match = frames?.find((f) => typeof f.url === 'string' && f.url === ensured.href);
-        if (match) locFrameId = match.frameId;
-      } catch {}
-    }
+    const locFrameId = isCompositeSelector(selector) ? await resolveLookupFrame(tabId, ensured) : frameId;
     return { ref: ensured.ref, center: ensured.center, frameId: locFrameId };
   } catch {
     return null;

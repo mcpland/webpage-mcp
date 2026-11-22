@@ -1779,7 +1779,7 @@
                   return true;
                 }
                 // Bridge to child frame via postMessage with timeout
-                const reqId = `rrc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                const reqId = Array.from(crypto.getRandomValues(new Uint32Array(4))).join("-");
                 const BRIDGE_TIMEOUT_MS = 5000; // 5 second timeout for iframe bridge
                 let responded = false;
                 let timeoutHandle = null;
@@ -1821,6 +1821,7 @@
                       sendResponse({
                         success: true,
                         ref: childRef,
+                        lookupId: reqId,
                         center,
                         href: truncateUtf8(
                           typeof data.href === 'string' ? data.href : '',
@@ -2491,7 +2492,7 @@
             }
             return;
           }
-          if (!data || data.type !== 'rr-bridge-ensure-ref') return;
+          if (!data || data.type !== 'rr-bridge-ensure-ref' || ev.source !== window.parent) return;
           const { selector, useText, isXPath, tagName } = data || {};
           const reqId = normalizeTargetInput(data.reqId, 'reqId', 128);
           const respond = (payload) => {
@@ -2582,6 +2583,7 @@
               return;
             }
             const refId = ensureRef(el);
+            window.__webpageFrameLookup = reqId;
             const rect = el.getBoundingClientRect();
             respond({
               success: true,

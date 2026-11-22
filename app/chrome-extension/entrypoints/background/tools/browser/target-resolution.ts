@@ -1,3 +1,5 @@
+import { resolveLookupFrame } from '@/shared/selector/frame-identity';
+
 export interface BrowserCoordinates {
   x: number;
   y: number;
@@ -129,33 +131,13 @@ function normalizeCoordinates(value: any): BrowserCoordinates | undefined {
 export async function resolveFrameIdForMessageResult(
   tabId: number,
   requestedFrameId: number | undefined,
-  response: { href?: unknown } | null | undefined,
+  response: { href?: unknown; lookupId?: unknown } | null | undefined,
 ): Promise<number | undefined> {
-  if (typeof requestedFrameId === 'number') {
-    return requestedFrameId;
+  const owner = response ? await resolveLookupFrame(tabId, response) : undefined;
+  if (owner !== undefined && requestedFrameId !== undefined && owner !== requestedFrameId) {
+    throw new Error('The selector resolved outside the requested frame');
   }
-
-  const href =
-    typeof response?.href === 'string' &&
-    response.href.length <= 16 * 1024 &&
-    response.href.trim()
-      ? response.href.trim()
-      : undefined;
-  if (!href) {
-    return requestedFrameId;
-  }
-
-  try {
-    const frames = await chrome.webNavigation.getAllFrames({ tabId });
-    const match = frames?.find(
-      (frame) => typeof frame.url === 'string' && frame.url === href,
-    );
-    return typeof match?.frameId === 'number'
-      ? match.frameId
-      : requestedFrameId;
-  } catch {
-    return requestedFrameId;
-  }
+  return owner ?? requestedFrameId;
 }
 
 export function getResolvedViewportCoordinates(

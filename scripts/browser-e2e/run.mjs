@@ -93,6 +93,19 @@ const scenarios = {
     assert.match(snapshot, /Late Button/);
   },
 
+  async "same-url-frames"(t) {
+    const tabId = await t.open("/sibling-frames");
+    for (const id of ["first", "second"]) {
+      const click = await t.call("chrome_click_element", { tabId, selector: `#${id} |> #hit` });
+      assert.ok(click.ok, click.text);
+    }
+    const state = await t.call("chrome_javascript", {
+      tabId, code: 'return Array.from(document.querySelectorAll("iframe"), f => f.contentDocument.querySelector("button").textContent).join(",")',
+    });
+    assert.ok(state.ok, state.text);
+    assert.match(state.text, /click1,click1/);
+  },
+
   async "iframe-refs"(t) {
     const tabId = await t.open("/frames");
     const frames = await waitFor(async () => {
