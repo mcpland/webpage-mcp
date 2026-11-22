@@ -1069,6 +1069,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     );
 
     let tabToOperateOn: chrome.tabs.Tab | undefined;
+    let blankRecovery: { tabId: number; url: string } | undefined;
 
     try {
       const explicitTab = await this.tryGetTab(targetTabId);
@@ -1078,6 +1079,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       if (targetUrl) {
         if (explicitTab?.id) {
           if (!canAttachBeforeNavigation(explicitTab.url)) {
+            blankRecovery = { tabId: explicitTab.id, url: targetUrl };
             await prepareBlankCaptureTab(explicitTab.id);
           }
           tabToOperateOn = explicitTab;
@@ -1094,6 +1096,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
               active: background !== true,
               windowId,
             });
+            if (tabToOperateOn.id) blankRecovery = { tabId: tabToOperateOn.id, url: targetUrl };
             loadAfterStart = targetUrl;
           }
         }
@@ -1142,7 +1145,10 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       if (loadAfterStart) {
         try {
           await chrome.tabs.update(tabId, { url: loadAfterStart });
+          blankRecovery = undefined;
         } catch (error: any) {
+          // If Chrome rejected the requested URL, restore the original tab when possible.
+          blankRecovery = blankRecovery && explicitTab?.url ? { tabId, url: explicitTab.url } : undefined;
           await this.stopCapture(tabId);
           return createErrorResponse(
             `Failed to load the URL in tab ${tabId}: ${error.message || String(error)}`,
@@ -1181,6 +1187,17 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       return createErrorResponse(
         `Error in NetworkDebuggerStartTool: ${error.message || String(error)}`,
       );
+    } finally {
+      if (blankRecovery) {
+        const { tabId, url } = blankRecovery;
+        try {
+          const tab = await chrome.tabs.get(tabId);
+          // Preserve any navigation the user started while capture was connecting.
+          if ((tab.pendingUrl || tab.url) === 'about:blank') await chrome.tabs.update(tabId, { url });
+        } catch {
+          // The tab may have closed. Preserve the original capture failure.
+        }
+      }
     }
   }
 }

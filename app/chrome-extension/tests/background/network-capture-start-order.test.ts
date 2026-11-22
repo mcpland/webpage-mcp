@@ -126,6 +126,36 @@ describe('network capture start with a url', () => {
     const stopped = await networkDebuggerStartTool.stopCapture(9);
     expect(stopped.data?.tabUrl).toBe(TARGET);
   });
+  it.each(['attach', 'enable'])('debugger: continues to the requested URL after %s fails', async (stage) => {
+    tabUrl = 'chrome://newtab/';
+    const { networkDebuggerStartTool } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-debugger'
+    );
+    (stage === 'attach' ? cdp.attach : cdp.sendCommand).mockRejectedValueOnce(new Error('capture failed'));
+    const result = await networkDebuggerStartTool.execute({ url: TARGET, tabId: 9, background: true });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({ text: expect.stringContaining('capture failed') });
+    expect(tabUrl).toBe(TARGET);
+    expect(networkDebuggerStartTool.getAvailableTabIds()).toEqual([]);
+    if (stage === 'enable') expect(cdp.detach).toHaveBeenCalledWith(9, 'network-capture');
+  });
+
+  it('debugger: preserves a user navigation already pending when attachment fails', async () => {
+    tabUrl = 'chrome://newtab/';
+    const { networkDebuggerStartTool } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-debugger'
+    );
+    cdp.attach.mockImplementationOnce(async () => {
+      vi.mocked(chrome.tabs.get).mockResolvedValueOnce({
+        url: 'about:blank', pendingUrl: 'https://example.com/other',
+      } as chrome.tabs.Tab);
+      throw new Error('detached');
+    });
+    const result = await networkDebuggerStartTool.execute({ url: TARGET, tabId: 9, background: true });
+    expect(result.isError).toBe(true);
+    expect(order).toEqual(['load:about:blank']);
+  });
+
   it('debugger: fails without capturing if the blank navigation never commits', async () => {
     tabUrl = 'chrome://newtab/';
     vi.mocked(chrome.tabs.update).mockImplementation(async () => ({ id: 9, url: tabUrl }) as chrome.tabs.Tab);
