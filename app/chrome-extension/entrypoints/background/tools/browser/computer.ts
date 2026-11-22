@@ -1379,7 +1379,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               : Array.from({ length: repeat }, () => keysStr).join(',');
           const res = await keyboardTool.execute({
             keys: repeatedKeys,
-            frameId: params.frameId,
+            frameId: resolveRefTarget(params.ref, params.frameId)?.frameId ?? params.frameId,
             tabId: tab.id,
             windowId: tab.windowId,
             background: params.background === true,

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { computerTool } from '@/entrypoints/background/tools/browser/computer';
+import { keyboardTool } from '@/entrypoints/background/tools/browser/keyboard';
 import { clickTool, fillTool } from '@/entrypoints/background/tools/browser/interaction';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
@@ -57,6 +58,18 @@ describe('computerTool', () => {
       expect(spy.mock.calls[0][0]).toMatchObject({ background: true, tabId: 7 });
     },
   );
+
+  it('delivers fallback keys to the frame encoded in the focused ref', async () => {
+    vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(clickTool, 'execute').mockResolvedValue({ content: [], isError: false });
+    vi.spyOn(cdpSessionManager, 'attach').mockRejectedValue(new Error('Debugger busy'));
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(keyboardTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const send = vi.spyOn(keyboardTool as any, 'sendMessageToTab').mockResolvedValue({ success: true });
+    const result = await computerTool.execute({ tabId: 7, background: true, action: 'key', text: 'Enter', ref: 'f12:ref_1' });
+    expect(result.isError).toBe(false);
+    expect(send).toHaveBeenCalledWith(7, expect.objectContaining({ action: 'simulateKeyboard' }), 12);
+  });
 
   it.each(['type', 'key'] as const)(
     'does not %s into the focused element when the ref cannot be focused',
