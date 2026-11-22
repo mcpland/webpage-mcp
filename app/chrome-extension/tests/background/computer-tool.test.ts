@@ -71,6 +71,16 @@ describe('computerTool', () => {
     expect(send).toHaveBeenCalledWith(7, expect.objectContaining({ action: 'simulateKeyboard' }), 12);
   });
 
+  it('preserves a literal comma and repeats parsed fallback strokes without retrying CDP', async () => {
+    vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    const attach = vi.spyOn(cdpSessionManager, 'attach').mockRejectedValue(new Error('Debugger busy'));
+    const helper = vi.spyOn(keyboardTool, 'sendHelperSteps').mockResolvedValue({ content: [], isError: false });
+    await computerTool.execute({ tabId: 7, background: true, action: 'key', text: 'a , b', repeat: 2 });
+    expect(attach).toHaveBeenCalledOnce();
+    expect(helper.mock.calls[0][2].map((step) => step.kind === 'stroke' && step.stroke.key.key))
+      .toEqual(['a', ',', 'b', 'a', ',', 'b']);
+  });
+
   it.each(['type', 'key'] as const)(
     'does not %s into the focused element when the ref cannot be focused',
     async (action) => {

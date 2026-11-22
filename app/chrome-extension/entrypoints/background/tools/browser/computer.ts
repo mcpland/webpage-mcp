@@ -1371,20 +1371,13 @@ class ComputerTool extends BaseBrowserToolExecutor {
           };
         } catch (e) {
           if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
-          // Fallback to DOM keyboard simulation (comma-separated combinations)
-          const keysStr = tokens.join(',');
-          const repeatedKeys =
-            repeat === 1
-              ? keysStr
-              : Array.from({ length: repeat }, () => keysStr).join(',');
-          const res = await keyboardTool.execute({
-            keys: repeatedKeys,
-            frameId: resolveRefTarget(params.ref, params.frameId)?.frameId ?? params.frameId,
-            tabId: tab.id,
-            windowId: tab.windowId,
-            background: params.background === true,
-          });
-          return res;
+          const sequence: KeyboardStep[] = strokes.map((stroke, i) => ({
+            kind: 'stroke', stroke, token: tokens[i],
+          }));
+          const steps = Array.from({ length: repeat }, () => sequence).flat();
+          const frameId = resolveRefTarget(params.ref, params.frameId)?.frameId ?? params.frameId;
+          if (params.background !== true) await this.activateTabIfNeeded(tab);
+          return keyboardTool.sendHelperSteps(tab.id!, params.text, steps, TIMEOUTS.KEYBOARD_DELAY, undefined, frameId);
         }
       }
       case 'wait': {
