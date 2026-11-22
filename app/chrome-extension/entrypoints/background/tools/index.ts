@@ -25,6 +25,7 @@ import {
 import { recordingStartTool, recordingStatusTool, recordingStopTool } from './recording';
 import { getSessionContext, patchSessionContext } from '../session-context';
 import { runInTabQueue } from '../tab-queue';
+import { observePageChanges, pageChangeSettleMs, withPageChange } from './page-change';
 
 const tools = {
   ...browserTools,
@@ -150,6 +151,20 @@ function createToolAbortError(): Error {
 
 function throwIfToolAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw createToolAbortError();
+}
+
+/** The tab an interaction will act on: its tabId, else the active tab (as the tools pick it). */
+async function resolveObservedTabId(args: any): Promise<number | undefined> {
+  if (typeof args?.tabId === 'number') return args.tabId;
+  try {
+    const [tab] =
+      typeof args?.windowId === 'number'
+        ? await chrome.tabs.query({ active: true, windowId: args.windowId })
+        : await chrome.tabs.query({ active: true, currentWindow: true });
+    return typeof tab?.id === 'number' ? tab.id : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function hasSwitchTabSelector(args: any): boolean {
@@ -457,11 +472,33 @@ export const handleCallTool = async (param: ToolCallParam) => {
             ...(param.signal ? { signal: param.signal } : {}),
           }
         : undefined;
+    // MCP callers get a page-change summary on interactions; internal callers
+    // (workflow replay) skip the extra settle time.
+    const pageChangeSettle = shouldApplyMcpBackgroundDefault
+      ? pageChangeSettleMs(param.name, mergedArgs)
+      : undefined;
     const execute = async () => {
       throwIfToolAborted(param.signal);
-      const result = executionContext
-        ? await tool.execute(mergedArgs, executionContext)
-        : await tool.execute(mergedArgs);
+      const observedTabId =
+        pageChangeSettle === undefined ? undefined : await resolveObservedTabId(mergedArgs);
+      const observer =
+        observedTabId === undefined
+          ? undefined
+          : await observePageChanges(observedTabId, pageChangeSettle ?? 0);
+      // Tool results stay untyped here, as before (callers read them loosely).
+      let result: any;
+      try {
+        result = executionContext
+          ? await tool.execute(mergedArgs, executionContext)
+          : await tool.execute(mergedArgs);
+      } catch (error) {
+        observer?.cancel();
+        throw error;
+      }
+      if (observer) {
+        if (result?.isError) observer.cancel();
+        else result = withPageChange(result, await observer.finish(result));
+      }
       throwIfToolAborted(param.signal);
       return result;
     };

@@ -504,6 +504,47 @@ describe('handleCallTool navigation routing', () => {
     });
   });
 
+  it('adds a page-change summary to MCP interactions only', async () => {
+    const listeners: Array<(tabId: number, info: chrome.tabs.TabChangeInfo) => void> = [];
+    let tabUrl = 'https://example.com/login';
+    (chrome.tabs as any).onCreated = { addListener: vi.fn(), removeListener: vi.fn() };
+    (chrome.tabs as any).onUpdated = {
+      addListener: vi.fn((listener) => listeners.push(listener)),
+      removeListener: vi.fn((listener) => listeners.splice(listeners.indexOf(listener), 1)),
+    };
+    mocks.tabsGet.mockImplementation(async () => ({
+      id: 10,
+      windowId: 55,
+      url: tabUrl,
+      title: tabUrl.endsWith('/home') ? 'Home' : 'Login',
+      status: 'complete',
+    }));
+    mocks.clickExecute.mockImplementation(async () => {
+      tabUrl = 'https://example.com/home';
+      for (const listener of [...listeners]) listener(10, { url: tabUrl });
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, navigationOccurred: false }) }],
+        isError: false,
+      };
+    });
+
+    const viaMcp = await handleCallTool({
+      name: TOOL_NAMES.BROWSER.CLICK,
+      args: { ref: 'ref_1' },
+      meta: { mcpSessionId: 'session-1', source: 'mcp' },
+    });
+    const payload = JSON.parse(String((viaMcp.content[0] as { text?: string }).text));
+    expect(payload).toMatchObject({
+      navigationOccurred: true,
+      pageChange: { navigated: true, url: 'https://example.com/home', title: 'Home' },
+    });
+    expect(listeners).toHaveLength(0);
+
+    tabUrl = 'https://example.com/login';
+    const internal = await handleCallTool({ name: TOOL_NAMES.BROWSER.CLICK, args: { tabId: 10 } });
+    expect(String((internal.content[0] as { text?: string }).text)).not.toContain('pageChange');
+  });
+
   it('lets chrome_switch_tab find its tab by url instead of the session tab', async () => {
     mocks.switchExecute.mockResolvedValue({
       content: [

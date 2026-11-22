@@ -1301,7 +1301,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.COMPUTER,
     description:
-      "Use a mouse and keyboard to interact with an HTTP(S) browser tab, and take screenshots.\n* Whenever you intend to click on an element like an icon, you should consult a read_page to determine the ref of the element before moving the cursor.\n* If you tried clicking on a program or link but it failed to load, even after waiting, try screenshot and then adjusting your click location so that the tip of the cursor visually falls on the element that you want to click.\n* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.",
+      "Use a mouse and keyboard to interact with an HTTP(S) browser tab, and take screenshots.\n* Whenever you intend to click on an element like an icon, you should consult a read_page to determine the ref of the element before moving the cursor.\n* If you tried clicking on a program or link but it failed to load, even after waiting, try screenshot and then adjusting your click location so that the tip of the cursor visually falls on the element that you want to click.\n* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.\n* Clicks, keys and submits report navigation and new tabs as pageChange in the result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2179,7 +2179,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.CLICK,
     description:
-      "Click on an element in an HTTP(S) web page. Supports multiple targeting methods: CSS selector, XPath, element ref (from chrome_read_page), or viewport coordinates. More focused than chrome_computer for simple click operations.",
+      "Click on an element in an HTTP(S) web page. Supports multiple targeting methods: CSS selector, XPath, element ref (from chrome_read_page), or viewport coordinates. More focused than chrome_computer for simple click operations. If the action navigates the page or opens tabs, the result reports it as pageChange (navigated, url, title, newTabs).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2262,7 +2262,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.FILL,
     description:
-      "Fill or select a form element on an HTTP(S) web page. Supports input, textarea, select, checkbox, and radio elements. Use CSS selector, XPath, or element ref to target the element.",
+      "Fill or select a form element on an HTTP(S) web page. Supports input, textarea, select, checkbox, and radio elements. Use CSS selector, XPath, or element ref to target the element. If the action navigates the page or opens tabs, the result reports it as pageChange (navigated, url, title, newTabs).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2376,7 +2376,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.KEYBOARD,
     description:
-      "Simulate keyboard input on an HTTP(S) web page. Supports single keys (Enter, Tab, Escape), key combinations (Ctrl+C, Ctrl+V), and text input. Can target a specific element or send to the focused element.",
+      "Simulate keyboard input on an HTTP(S) web page. Supports single keys (Enter, Tab, Escape), key combinations (Ctrl+C, Ctrl+V), and text input. Can target a specific element or send to the focused element. If the action navigates the page or opens tabs, the result reports it as pageChange (navigated, url, title, newTabs).",
     inputSchema: {
       type: "object",
       properties: {
