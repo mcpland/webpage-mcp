@@ -177,7 +177,17 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
   }
 
   function applyEdit(element, key, modifiers, text) {
-    if (!(element.matches('input, textarea') || element.isContentEditable)) return;
+    const isTextInput = element.tagName === 'INPUT' &&
+      ['text', 'search', 'url', 'tel', 'email', 'password', 'number'].includes(element.type);
+    if (!(isTextInput || element.tagName === 'TEXTAREA' || element.isContentEditable)) {
+      if (modifiers.ctrlKey || modifiers.altKey || modifiers.metaKey) return;
+      const button = element.matches('button, input:is([type=button], [type=submit], [type=reset], [type=image])');
+      if ((key === 'Enter' && (button || element.matches('a[href]'))) ||
+          (key === ' ' && (button || element.matches('input:is([type=checkbox], [type=radio])')))) {
+        element.click();
+      }
+      return;
+    }
     const commandKey = modifiers.ctrlKey || modifiers.metaKey;
     let command;
     if (commandKey && !modifiers.altKey && !modifiers.shiftKey && key.toLowerCase() === 'a') command = 'selectAll';

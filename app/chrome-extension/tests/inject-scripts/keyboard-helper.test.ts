@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { runInThisContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { parseKeyboardInput } from '@/utils/cdp-keyboard';
 import { computerTool } from '@/entrypoints/background/tools/browser/computer';
 import { keyboardTool } from '@/entrypoints/background/tools/browser/keyboard';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
@@ -34,6 +35,10 @@ function dispatch(listener: RuntimeListener, request: Record<string, unknown>): 
   });
 }
 
+function sendKeys(listener: RuntimeListener, keys: string) {
+  return dispatch(listener, { action: 'simulateKeyboard', keys, steps: parseKeyboardInput(keys) });
+}
+
 describe('keyboard-helper page protocol', () => {
   beforeEach(() => {
     document.body.replaceChildren();
@@ -53,6 +58,23 @@ describe('keyboard-helper page protocol', () => {
     delete (window as any).__KEYBOARD_HELPER_INITIALIZED__;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('activates non-text controls without editing them or submitting their form', async () => {
+    document.body.innerHTML = '<form><input type="checkbox"><input type="button"></form>';
+    const [box, button] = document.querySelectorAll('input');
+    const submit = vi.fn((event: Event) => event.preventDefault());
+    document.querySelector('form')!.addEventListener('submit', submit);
+    const click = vi.fn();
+    button.addEventListener('click', click);
+    const listener = executeHelper();
+    box.focus();
+    expect((await sendKeys(listener, 'Space')).success).toBe(true);
+    expect(box.checked).toBe(true);
+    button.focus();
+    expect((await sendKeys(listener, 'Enter')).success).toBe(true);
+    expect(click).toHaveBeenCalledOnce();
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it('initializes once and answers the synchronous health check', async () => {
