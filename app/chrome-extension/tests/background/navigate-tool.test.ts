@@ -1029,6 +1029,27 @@ describe('navigateTool', () => {
     }
   });
 
+  it.each(['back', 'forward'] as const)('does not issue %s after cancellation during history preflight', async (url) => {
+    Object.assign(chrome, { webNavigation: {
+      getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0 }, { frameId: 9 }]),
+    } });
+    const controller = new AbortController();
+    const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockImplementation(async (_tab, _method, _params, signal) => {
+      controller.abort();
+      expect(signal?.aborted).toBe(true);
+      return { currentIndex: 0, entries: [] };
+    });
+    try {
+      const result = await navigateTool.execute({ url }, { signal: controller.signal });
+      expect(history).toHaveBeenCalled();
+      expect(result.isError).toBe(true);
+      expect(mocks.tabsGoBack).not.toHaveBeenCalled();
+      expect(mocks.tabsGoForward).not.toHaveBeenCalled();
+    } finally {
+      history.mockRestore();
+    }
+  });
+
   it.each(['back', 'forward'] as const)('recognizes %s through a child frame only after the joint history entry changes', async (direction) => {
     vi.useFakeTimers();
     const event = { addListener: vi.fn(), removeListener: vi.fn() };
@@ -1055,7 +1076,7 @@ describe('navigateTool', () => {
       });
       await vi.advanceTimersByTimeAsync(8500);
       expect((await pending).isError).toBe(false);
-      expect(history).toHaveBeenCalledWith(tab.id, 'Page.getNavigationHistory');
+      expect(history).toHaveBeenCalledWith(tab.id, 'Page.getNavigationHistory', undefined, expect.any(AbortSignal));
       expect(event.removeListener).toHaveBeenCalledWith(event.addListener.mock.calls[0][0]);
     } finally {
       history.mockRestore();

@@ -24,8 +24,8 @@ interface TabHistory {
   entries: Array<{ id: number }>;
 }
 
-function readTabHistory(tabId: number): Promise<TabHistory | undefined> {
-  return cdpSessionManager.sendCommand<TabHistory>(tabId, 'Page.getNavigationHistory')
+function readTabHistory(tabId: number, signal: AbortSignal): Promise<TabHistory | undefined> {
+  return cdpSessionManager.sendCommand<TabHistory>(tabId, 'Page.getNavigationHistory', undefined, signal)
     .catch(() => undefined);
 }
 
@@ -211,9 +211,11 @@ class NavigateTool extends BaseBrowserToolExecutor {
   private async waitForLoadComplete(
     tabId: number,
     deadline: number,
+    signal?: AbortSignal,
   ): Promise<chrome.tabs.Tab> {
     let current = await chrome.tabs.get(tabId);
     while (current.status !== 'complete' && Date.now() < deadline) {
+      signal?.throwIfAborted();
       await this.sleep(NAVIGATION_POLL_MS);
       current = await chrome.tabs.get(tabId);
     }
@@ -225,12 +227,18 @@ class NavigateTool extends BaseBrowserToolExecutor {
     previousUrl: string,
     direction: 'back' | 'forward',
     waitUntil: NavigationWaitUntil,
+    callerSignal?: AbortSignal,
   ): Promise<chrome.tabs.Tab> {
     // Entries may share a URL, including pushState and full-document navigations.
     // Arm before calling goBack/goForward so a cached or same-document commit is observable.
+    const timeoutMs = waitUntil === 'load' ? NAVIGATION_LOAD_TIMEOUT_MS : NAVIGATION_WAIT_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
+    signal.throwIfAborted();
     const navigation = chrome.webNavigation;
     const frames = await navigation?.getAllFrames?.({ tabId })?.catch(() => null);
-    const before = frames?.some((frame) => frame.frameId !== 0) ? await readTabHistory(tabId) : undefined;
+    const before = frames?.some((frame) => frame.frameId !== 0) ? await readTabHistory(tabId, signal) : undefined;
     const destinations = before && new Set((direction === 'back'
       ? before.entries.slice(0, before.currentIndex)
       : before.entries.slice(before.currentIndex + 1)).map((entry) => entry.id));
@@ -248,23 +256,24 @@ class NavigateTool extends BaseBrowserToolExecutor {
     const events = [navigation?.onCommitted, navigation?.onHistoryStateUpdated, navigation?.onReferenceFragmentUpdated];
     for (const event of events) event?.addListener(onCommit);
     try {
-      const deadline = Date.now() + (waitUntil === 'load' ? NAVIGATION_LOAD_TIMEOUT_MS : NAVIGATION_WAIT_TIMEOUT_MS);
+      signal.throwIfAborted();
       if (direction === 'back') await chrome.tabs.goBack(tabId);
       else await chrome.tabs.goForward(tabId);
 
       for (;;) {
+        signal.throwIfAborted();
         const current = await chrome.tabs.get(tabId);
         // Chrome can report a child traversing pushState entries without a forward_back
         // qualifier. Confirm it reached an existing joint session-history entry.
         if (childUpdated && destinations?.size && !childTraversed) {
           childUpdated = false;
-          const history = await readTabHistory(tabId);
+          const history = await readTabHistory(tabId, signal);
           const entry = history?.entries[history.currentIndex];
           childTraversed = entry !== undefined && destinations.has(entry.id);
         }
         if (current.url && (current.url !== previousUrl || current.url === committedUrl || childTraversed)) {
           if (waitUntil === 'commit' || current.status === 'complete') return current;
-          return this.waitForLoadComplete(tabId, deadline);
+          return this.waitForLoadComplete(tabId, deadline, callerSignal);
         }
         if (Date.now() >= deadline) {
           throw new Error('Timed out waiting for history navigation to commit');
@@ -454,10 +463,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
     };
   }
 
-  async execute(args: NavigateToolParams): Promise<ToolResult> {
+  async execute(args: NavigateToolParams, context?: { signal?: AbortSignal }): Promise<ToolResult> {
     const snapshot = parseSnapshotOptions(args?.includeSnapshot);
     if (snapshot instanceof Error) return createErrorResponse(snapshot.message);
-    const result = await this.navigate(args);
+    const result = await this.navigate(args, context?.signal);
     if (!snapshot || result.isError) return result;
     // Opening a page is almost always followed by reading it; do both in one call.
     const tabId = navigatedTabId(result);
@@ -472,7 +481,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
     return { ...result, content: [...result.content, snapshotBlock] };
   }
 
-  private async navigate(args: NavigateToolParams): Promise<ToolResult> {
+  private async navigate(args: NavigateToolParams, signal?: AbortSignal): Promise<ToolResult> {
     const {
       openMode,
       newTab = false,
@@ -571,7 +580,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         });
 
         const urlBeforeHistory = String(targetTab.url || '');
-        const updatedTab = await this.navigateHistory(targetTab.id, urlBeforeHistory, url, waitUntil);
+        const updatedTab = await this.navigateHistory(targetTab.id, urlBeforeHistory, url, waitUntil, signal);
         if (hasDisallowedPublicUrlScheme(String(updatedTab.url || ''))) {
           return createErrorResponse(getNavigateTargetPageError('history'));
         }
