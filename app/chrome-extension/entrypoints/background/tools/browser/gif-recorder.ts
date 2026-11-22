@@ -63,6 +63,7 @@ import {
 } from './gif-capture-owner';
 import { encodeGifCanvasFrame } from './gif-frame-transport';
 import {
+  getResolvedLocalCoordinates,
   getResolvedViewportCoordinates,
   resolveRefTarget,
 } from './target-resolution';
@@ -1380,6 +1381,7 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             // Resolve drop target coordinates
             let targetX: number | undefined;
             let targetY: number | undefined;
+            let targetFrameId: number | undefined;
 
             if (ref) {
               // Use the project's built-in ref resolution mechanism
@@ -1394,13 +1396,15 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
                   },
                   refTarget?.frameId,
                 );
-                const targetPoint = getResolvedViewportCoordinates(
-                  resolved,
-                  refTarget?.frameId,
-                );
+                const isChildFrame =
+                  typeof refTarget?.frameId === 'number' && refTarget.frameId > 0;
+                const targetPoint = isChildFrame
+                  ? getResolvedLocalCoordinates(resolved)
+                  : getResolvedViewportCoordinates(resolved, refTarget?.frameId);
                 if (resolved?.success && targetPoint) {
                   targetX = targetPoint.x;
                   targetY = targetPoint.y;
+                  if (isChildFrame) targetFrameId = refTarget.frameId;
                 } else {
                   return createErrorResponse(`Could not resolve ref: ${ref}`);
                 }
@@ -1460,7 +1464,10 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
                 : `${filename}.gif`;
 
               const [result] = await chrome.scripting.executeScript({
-                target: { tabId: tab.id },
+                target:
+                  typeof targetFrameId === 'number' && targetFrameId > 0
+                    ? { tabId: tab.id, frameIds: [targetFrameId] }
+                    : { tabId: tab.id },
                 func: (
                   base64Data: string,
                   x: number,

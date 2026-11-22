@@ -134,4 +134,51 @@ describe('page change summary', () => {
     expect(created).toHaveLength(0);
     expect(updated).toHaveLength(0);
   });
+
+  it('cleans up listeners and returns undefined when aborted by signal', async () => {
+    const controller = new AbortController();
+    const observer = (await observePageChanges(7, 500, controller.signal))!;
+    const pending = observer.finish(okResult());
+    controller.abort();
+
+    expect(await pending).toBeUndefined();
+    expect(created).toHaveLength(0);
+    expect(updated).toHaveLength(0);
+  });
+
+  it('does not wait for load when chained dialogs leave an unhandled dialog', async () => {
+    const observer = (await observePageChanges(7, 0))!;
+    navigate('https://example.com/chained', '', 'loading');
+    const summary = await observer.finish(
+      okResult({
+        dialogs: [
+          { type: 'confirm', handled: 'accept' },
+          { type: 'alert', handled: false },
+        ],
+      }),
+    );
+    expect(summary).toMatchObject({ navigated: true, loading: true });
+  });
+
+  it('ignores transient status=loading updates without webNavigation.onCommitted', async () => {
+    const committed: Listener[] = [];
+    const originalWebNavigation = (chrome as any).webNavigation;
+    (chrome as any).webNavigation = {
+      onCommitted: {
+        addListener: vi.fn((l: Listener) => committed.push(l)),
+        removeListener: vi.fn((l: Listener) => {
+          const idx = committed.indexOf(l);
+          if (idx >= 0) committed.splice(idx, 1);
+        }),
+      },
+    };
+    try {
+      const observer = (await observePageChanges(7, 0))!;
+      for (const l of updated) l(7, { status: 'loading' });
+      expect(await observer.finish(okResult())).toBeUndefined();
+      expect(committed).toHaveLength(0);
+    } finally {
+      (chrome as any).webNavigation = originalWebNavigation;
+    }
+  });
 });

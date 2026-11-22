@@ -481,23 +481,25 @@ export const handleCallTool = async (param: ToolCallParam) => {
       throwIfToolAborted(param.signal);
       const observedTabId =
         pageChangeSettle === undefined ? undefined : await resolveObservedTabId(mergedArgs);
+      throwIfToolAborted(param.signal);
       const observer =
         observedTabId === undefined
           ? undefined
-          : await observePageChanges(observedTabId, pageChangeSettle ?? 0);
+          : await observePageChanges(observedTabId, pageChangeSettle ?? 0, param.signal);
       // Tool results stay untyped here, as before (callers read them loosely).
       let result: any;
       try {
+        throwIfToolAborted(param.signal);
         result = executionContext
           ? await tool.execute(mergedArgs, executionContext)
           : await tool.execute(mergedArgs);
-      } catch (error) {
+        throwIfToolAborted(param.signal);
+        if (observer) {
+          if (result?.isError) observer.cancel();
+          else result = withPageChange(result, await observer.finish(result));
+        }
+      } finally {
         observer?.cancel();
-        throw error;
-      }
-      if (observer) {
-        if (result?.isError) observer.cancel();
-        else result = withPageChange(result, await observer.finish(result));
       }
       throwIfToolAborted(param.signal);
       return result;

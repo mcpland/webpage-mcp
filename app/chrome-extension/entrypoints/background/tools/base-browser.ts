@@ -129,23 +129,46 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
   /**
    * Inject the accessibility helper into `frameId` (top frame by default) and
    * every ancestor frame. Child frames project ref coordinates into the top
-   * viewport through their parents' helpers.
+   * viewport through their parents' helpers. Pass `{ allFrames: true }` for
+   * cross-frame composite selectors (`|>`) whose target iframe is not known yet.
    */
   protected async injectAccessibilityHelper(
     tabId: number,
     frameId?: number,
+    options?: { allFrames?: boolean },
   ): Promise<void> {
+    if (options?.allFrames) {
+      await this.injectContentScript(tabId, [ACCESSIBILITY_HELPER], false, 'ISOLATED', true);
+      return;
+    }
     const targetFrameId = typeof frameId === 'number' ? frameId : TOP_FRAME_ID;
     const chain = await this.getFrameAncestry(tabId, targetFrameId);
     for (const id of chain) {
-      await this.injectContentScript(
-        tabId,
-        [ACCESSIBILITY_HELPER],
-        false,
-        'ISOLATED',
-        false,
-        [id],
-      );
+      if (id !== targetFrameId) {
+        // Ancestors only assist with viewport coordinate projection; a
+        // sandboxed or opaque intermediate frame must not block targetFrameId.
+        try {
+          await this.injectContentScript(
+            tabId,
+            [ACCESSIBILITY_HELPER],
+            false,
+            'ISOLATED',
+            false,
+            [id],
+          );
+        } catch {
+          // Projection will degrade cleanly to DOM fallback if needed.
+        }
+      } else {
+        await this.injectContentScript(
+          tabId,
+          [ACCESSIBILITY_HELPER],
+          false,
+          'ISOLATED',
+          false,
+          [id],
+        );
+      }
     }
   }
 

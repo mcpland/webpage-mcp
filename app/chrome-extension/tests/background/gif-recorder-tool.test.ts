@@ -843,4 +843,58 @@ describe('gifRecorderTool', () => {
       id: 'drop-zone',
     });
   });
+
+  it('drops inside the child frame using frame-local coordinates for iframe-qualified refs', async () => {
+    vi.spyOn(gifRecorderTool as any, 'resolveTargetTab').mockResolvedValue(makeTab());
+    vi.spyOn(gifRecorderTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendMessageToTab = vi
+      .spyOn(gifRecorderTool as any, 'sendMessageToTab')
+      .mockResolvedValue({
+        success: true,
+        center: { x: 45, y: 55 },
+        viewportCenter: { x: 345, y: 455 },
+      });
+    const executeScript = chrome.scripting.executeScript as ReturnType<typeof vi.fn>;
+    executeScript.mockResolvedValueOnce([
+      {
+        result: {
+          success: true,
+          targetTagName: 'DIV',
+          targetId: 'iframe-drop-zone',
+        },
+      },
+    ]);
+
+    const start = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      fps: 1,
+      durationMs: 5_000,
+      width: 10,
+      height: 10,
+      filename: 'iframe-drop',
+    });
+    expect(start.isError).toBe(false);
+    expect((await gifRecorderTool.execute({ action: 'stop' })).isError).toBe(false);
+
+    const exportResult = await gifRecorderTool.execute({
+      action: 'export',
+      tabId: 7,
+      download: false,
+      ref: 'f12:ref_42',
+      filename: 'iframe-drop',
+    });
+    expect(exportResult.isError).toBe(false);
+    expect(sendMessageToTab).toHaveBeenCalledWith(
+      7,
+      { action: 'resolveRef', ref: 'ref_42' },
+      12,
+    );
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 7, frameIds: [12] },
+        args: [expect.any(String), 45, 55, 'iframe-drop.gif'],
+      }),
+    );
+  });
 });

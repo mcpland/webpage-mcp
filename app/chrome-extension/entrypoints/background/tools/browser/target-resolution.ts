@@ -98,12 +98,16 @@ export function resolveRefTarget(
 
 /** Qualify a frame-local ref so later calls are routed back to its frame. */
 export function qualifyFrameRef(ref: string, frameId?: number): string {
-  return typeof frameId === 'number' && frameId > 0 ? `f${frameId}:${ref}` : ref;
+  return typeof frameId === 'number' && Number.isSafeInteger(frameId) && frameId > 0
+    ? `f${frameId}:${ref}`
+    : ref;
 }
 
 /** Qualify every `[ref=ref_n]` marker of an accessibility tree for `frameId`. */
 export function qualifyPageContentRefs(pageContent: string, frameId?: number): string {
-  if (typeof frameId !== 'number' || frameId <= 0) return pageContent;
+  if (typeof frameId !== 'number' || !Number.isSafeInteger(frameId) || frameId <= 0) {
+    return pageContent;
+  }
   return pageContent.replace(
     PAGE_CONTENT_REF_PATTERN,
     (_match, ref: string) => `[ref=${qualifyFrameRef(ref, frameId)}]`,
@@ -163,7 +167,7 @@ export function getResolvedViewportCoordinates(
     return viewportCenter;
   }
 
-  if (typeof frameId === 'number') {
+  if (typeof frameId === 'number' && frameId !== 0) {
     return undefined;
   }
 

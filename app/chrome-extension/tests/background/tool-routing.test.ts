@@ -773,4 +773,32 @@ describe('handleCallTool navigation routing', () => {
       { signal: controller.signal },
     );
   });
+
+  it('cleans up page-change observers when a tool call is aborted during execution', async () => {
+    const updatedListeners: Array<(...args: any[]) => void> = [];
+    (chrome.tabs as any).onCreated = { addListener: vi.fn(), removeListener: vi.fn() };
+    (chrome.tabs as any).onUpdated = {
+      addListener: vi.fn((l: any) => updatedListeners.push(l)),
+      removeListener: vi.fn((l: any) => {
+        const idx = updatedListeners.indexOf(l);
+        if (idx >= 0) updatedListeners.splice(idx, 1);
+      }),
+    };
+    const controller = new AbortController();
+    mocks.clickExecute.mockImplementationOnce(async () => {
+      controller.abort();
+      return { content: [{ type: 'text', text: '{"success":true}' }], isError: false };
+    });
+
+    await expect(
+      handleCallTool({
+        name: TOOL_NAMES.BROWSER.CLICK,
+        args: { ref: 'ref_1' },
+        meta: { mcpSessionId: 'session-1', source: 'mcp' },
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(updatedListeners).toHaveLength(0);
+  });
 });
