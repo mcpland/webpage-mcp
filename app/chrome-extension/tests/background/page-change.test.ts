@@ -128,6 +128,31 @@ describe('page change summary', () => {
     }
   });
 
+  it('settles a redirected download on a loading tab without reporting a navigation', async () => {
+    vi.useFakeTimers();
+    const originalNavigation = chrome.webNavigation;
+    const originalRequests = chrome.webRequest;
+    const event = () => ({ addListener: vi.fn(), removeListener: vi.fn() });
+    const onBeforeNavigate = event(), onBeforeRedirect = event(), onErrorOccurred = event();
+    Object.assign(chrome, { webNavigation: { onBeforeNavigate, onCommitted: event(), onErrorOccurred },
+      webRequest: { onBeforeRedirect } });
+    try {
+      tabs.set(7, { id: 7, url: 'https://example.com/', status: 'loading' });
+      const observer = (await observePageChanges(7, 0))!;
+      const frame = { tabId: 7, frameId: 0 };
+      const start = 'https://example.com/go', middle = 'https://example.com/next', file = 'https://example.com/file';
+      onBeforeNavigate.addListener.mock.calls[0][0]({ ...frame, url: start });
+      const redirect = onBeforeRedirect.addListener.mock.calls[0][0];
+      redirect({ ...frame, url: start, redirectUrl: middle });
+      redirect({ ...frame, url: middle, redirectUrl: file });
+      onErrorOccurred.addListener.mock.calls[0][0]({ ...frame, url: file, error: 'net::ERR_ABORTED' });
+      expect(await observer.finish(okResult())).toBeUndefined();
+      expect(onBeforeRedirect.removeListener).toHaveBeenCalledWith(redirect);
+    } finally {
+      Object.assign(chrome, { webNavigation: originalNavigation, webRequest: originalRequests });
+    }
+  });
+
   it('returns nothing when the page did not change', async () => {
     const observer = (await observePageChanges(7, 0))!;
     expect(await observer.finish(okResult())).toBeUndefined();

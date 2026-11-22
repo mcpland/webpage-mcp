@@ -146,6 +146,14 @@ export async function observePageChanges(
   const onBeforeNavigate = (details: chrome.webNavigation.WebNavigationParentedCallbackDetails) => {
     if (details.tabId === tabId && details.frameId === 0) pendingReloadUrl = details.url;
   };
+  // webNavigation reports the initial URL at start and the final URL on error.
+  // Follow the main-frame redirect chain so a download can settle without a commit.
+  const redirects = navigation && chrome.webRequest?.onBeforeRedirect;
+  const onRedirect = (details: chrome.webRequest.WebRedirectionResponseDetails) => {
+    if (details.tabId === tabId && details.frameId === 0 && details.url === pendingReloadUrl) {
+      pendingReloadUrl = details.redirectUrl;
+    }
+  };
   const onNavigationError = (details: chrome.webNavigation.WebNavigationFramedErrorCallbackDetails) => {
     if (details.tabId === tabId && details.frameId === 0 && details.url === pendingReloadUrl) {
       pendingReloadUrl = undefined;
@@ -167,6 +175,7 @@ export async function observePageChanges(
   chrome.tabs.onUpdated.addListener(onUpdated);
   if (hasWebNavigation) chrome.webNavigation.onCommitted.addListener(onCommitted);
 
+  redirects?.addListener(onRedirect, { urls: ['<all_urls>'], types: ['main_frame'], tabId });
   navigation?.onBeforeNavigate?.addListener(onBeforeNavigate);
   navigation?.onErrorOccurred?.addListener(onNavigationError);
 
@@ -177,6 +186,7 @@ export async function observePageChanges(
     chrome.tabs.onCreated.removeListener(onCreated);
     chrome.tabs.onUpdated.removeListener(onUpdated);
     if (hasWebNavigation) chrome.webNavigation.onCommitted.removeListener(onCommitted);
+    redirects?.removeListener(onRedirect);
     navigation?.onBeforeNavigate?.removeListener(onBeforeNavigate);
     navigation?.onErrorOccurred?.removeListener(onNavigationError);
     signal?.removeEventListener('abort', stop);
