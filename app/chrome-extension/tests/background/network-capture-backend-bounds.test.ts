@@ -249,6 +249,26 @@ describe('network capture backend boundaries', () => {
     }
   });
 
+  it('stops all active captures and releases each debugger when a child stops replying', async () => {
+    const { networkDebuggerStartTool: backend, networkDebuggerStopTool } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-debugger'
+    );
+    vi.mocked(chrome.tabs.get).mockImplementation(async (id) => tab(id));
+    await (backend as any).startCaptureForTab(7, {
+      maxCaptureTime: 30_000, inactivityTimeout: 10_000, includeStatic: true,
+    });
+    await (backend as any).handleTabCreated({ id: 8, openerTabId: 7 });
+    expect(backend.getAvailableTabIds()).toContain(8);
+    cdp.sendCommand.mockImplementation(async (id, method, _params, signal) => {
+      if (id !== 8 || method !== 'Network.disable') return {};
+      return new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)));
+    });
+    const result = await networkDebuggerStopTool.execute({ all: true });
+    expect(result.isError).toBe(false);
+    for (const id of [7, 8]) expect(cdp.detach).toHaveBeenCalledWith(id, 'network-capture');
+    expect(backend.hasAvailableCapture()).toBe(false);
+  });
+
   it('releases the child debugger lease when a dialog stalls enable and disable', async () => {
     const { networkDebuggerStartTool: backend } = await import(
       '@/entrypoints/background/tools/browser/network-capture-debugger'

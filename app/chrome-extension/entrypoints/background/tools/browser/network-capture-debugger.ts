@@ -19,6 +19,11 @@ import {
   utf8ByteLength,
 } from './network-capture-limits';
 
+// A native dialog can stall the protocol reply even though Chrome received the command.
+function disableCaptureNetwork(tabId: number) {
+  return cdpSessionManager.sendCommand(tabId, 'Network.disable', undefined, AbortSignal.timeout(1_000));
+}
+
 interface NetworkDebuggerStartToolParams {
   url?: string; // URL to navigate to or focus. If not provided, uses active tab.
   maxCaptureTime?: number;
@@ -242,9 +247,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
         if (options.signal?.aborted) {
           // A native dialog can suspend both enable and disable. Queue the disable
           // behind enable, then release our lease even if Chrome withholds its reply.
-          await cdpSessionManager.sendCommand(
-            tabId, 'Network.disable', undefined, AbortSignal.timeout(1_000),
-          ).catch(() => {});
+          await disableCaptureNetwork(tabId).catch(() => {});
         }
         await cdpSessionManager
           .detach(tabId, 'network-capture')
@@ -937,7 +940,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       try {
         // Attempt to disable network and detach via manager; it will no-op if others own the session
         try {
-          await cdpSessionManager.sendCommand(tabId, 'Network.disable');
+          await disableCaptureNetwork(tabId);
         } catch (e) {
           console.warn(
             `NetworkDebuggerStartTool: Error disabling network for tab ${tabId} (possibly already detached):`,
