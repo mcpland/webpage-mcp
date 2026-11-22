@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { assertNativeSocketPathFits, getUnixSocketPathByteLimit } from './socket-path';
+import os from 'node:os';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  assertNativeSocketPathFits,
+  getNativeSocketPathCandidates,
+  getUnixSocketPathByteLimit,
+} from './socket-path';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
 describe('assertNativeSocketPathFits', () => {
   it('accepts the default-length socket paths', () => {
@@ -33,5 +43,25 @@ describe('assertNativeSocketPathFits', () => {
     expect(() =>
       assertNativeSocketPathFits(`\\\\.\\pipe\\${'x'.repeat(200)}`, 'win32'),
     ).not.toThrow();
+  });
+});
+
+describe('getNativeSocketPathCandidates', () => {
+  it('omits the legacy tmp path when WEBPAGE_MCP_NATIVE_SOCKET_DIR is set', () => {
+    vi.stubEnv('WEBPAGE_MCP_NATIVE_SOCKET', '');
+    vi.stubEnv('WEBPAGE_MCP_NATIVE_SOCKET_DIR', '/tmp/short-wmcp');
+    const candidates = getNativeSocketPathCandidates('darwin');
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatch(/^\/tmp\/short-wmcp\/native-/);
+  });
+
+  it('drops an oversized legacy tmp path instead of aborting retries on a valid primary path', () => {
+    vi.stubEnv('WEBPAGE_MCP_NATIVE_SOCKET', '');
+    vi.stubEnv('WEBPAGE_MCP_NATIVE_SOCKET_DIR', '');
+    vi.stubEnv('HOME', '/tmp/h');
+    vi.spyOn(os, 'tmpdir').mockReturnValue(`/private/tmp/${'x'.repeat(95)}`);
+    const candidates = getNativeSocketPathCandidates('darwin');
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatch(/^\/tmp\/h\/\.webpage-mcp\/native-/);
   });
 });

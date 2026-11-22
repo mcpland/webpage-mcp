@@ -21,6 +21,8 @@ import {
   ensureNativeSocketParentDir,
   getLegacyNativeSocketPath,
   getNativeSocketPath,
+  hasExplicitNativeSocketConfig,
+  isNativeSocketPathWithinLimit,
 } from './ipc/socket-path';
 import {
   constantTimeTokenEquals,
@@ -324,7 +326,11 @@ export class NativeMessagingHost {
 
       // Best-effort cleanup for legacy tmp socket path from older builds.
       const legacySocketPath = getLegacyNativeSocketPath();
-      if (!process.env.WEBPAGE_MCP_NATIVE_SOCKET?.trim() && legacySocketPath !== socketPath) {
+      if (
+        !hasExplicitNativeSocketConfig() &&
+        legacySocketPath !== socketPath &&
+        isNativeSocketPathWithinLimit(legacySocketPath)
+      ) {
         await prepareUnixSocketPath(legacySocketPath).catch(() => {
           // Never disturb an active listener or unrelated entry at the legacy path.
         });

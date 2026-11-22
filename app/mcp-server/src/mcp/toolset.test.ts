@@ -48,4 +48,17 @@ describe('parseToolset', () => {
     const allBytes = JSON.stringify(TOOL_SCHEMAS).length;
     expect(coreBytes / allBytes).toBeLessThan(0.5);
   });
+
+  it('ignores prototype names and unexposed internal tool names without crashing', () => {
+    const proto = parseToolset('core,toString,constructor,__proto__,chrome_network_capture_start');
+    expect(proto.allows('chrome_navigate')).toBe(true);
+    expect(proto.warnings).toEqual([
+      expect.stringContaining('"toString"'),
+      expect.stringContaining('"constructor"'),
+      expect.stringContaining('"__proto__"'),
+      expect.stringContaining('"chrome_network_capture_start"'),
+    ]);
+    expect(parseToolset(' , , ').spec).toBeUndefined();
+    expect(parseToolset(' , , ').allows('chrome_navigate')).toBe(true);
+  });
 });

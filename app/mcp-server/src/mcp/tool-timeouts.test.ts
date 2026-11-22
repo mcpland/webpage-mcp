@@ -56,4 +56,11 @@ describe('resolveToolCallTimeoutMs', () => {
       DEFAULT_TOOL_CALL_TIMEOUT_MS + 10_000,
     );
   });
+
+  it('ignores Object.prototype property names instead of returning NaN or throwing', () => {
+    for (const name of ['toString', 'constructor', '__proto__', 'valueOf', 'hasOwnProperty']) {
+      expect(resolveToolCallTimeoutMs(name, {})).toBe(DEFAULT_TOOL_CALL_TIMEOUT_MS);
+      expect(resolveBridgeCallTimeoutMs(name, {})).toBe(DEFAULT_TOOL_CALL_TIMEOUT_MS + 10_000);
+    }
+  });
 });

@@ -62,8 +62,11 @@ const TOOL_WAITS: Record<string, WaitEstimator> = {
 export function resolveToolCallTimeoutMs(name: string, args: unknown): number {
   const record =
     args && typeof args === 'object' && !Array.isArray(args) ? (args as ToolArgs) : {};
-  const estimator =
-    TOOL_WAITS[name] ?? (name.startsWith('flow.') ? TOOL_WAITS.workflow_run : undefined);
+  const estimator = Object.prototype.hasOwnProperty.call(TOOL_WAITS, name)
+    ? TOOL_WAITS[name]
+    : name.startsWith('flow.')
+      ? TOOL_WAITS.workflow_run
+      : undefined;
   const wait = estimator?.(record);
   if (!wait) return DEFAULT_TOOL_CALL_TIMEOUT_MS;
   return Math.min(

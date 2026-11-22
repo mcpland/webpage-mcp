@@ -2,8 +2,7 @@ import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import {
   assertNativeSocketPathFits,
-  getLegacyNativeSocketPath,
-  getNativeSocketPath,
+  getNativeSocketPathCandidates,
 } from '../ipc/socket-path';
 import { IPC_AUTH_METHOD, readNativeIpcCredential } from '../ipc/bridge-auth';
 import { BoundedNdjsonDecoder } from '../ipc/bounded-ndjson';
@@ -104,17 +103,7 @@ function shouldRetryConnect(error: unknown): boolean {
 }
 
 function getSocketPathCandidates(): string[] {
-  const explicit = process.env.WEBPAGE_MCP_NATIVE_SOCKET?.trim();
-  if (explicit) {
-    return [explicit];
-  }
-
-  const primaryPath = getNativeSocketPath();
-  const legacyPath = getLegacyNativeSocketPath();
-  if (legacyPath === primaryPath) {
-    return [primaryPath];
-  }
-  return [primaryPath, legacyPath];
+  return getNativeSocketPathCandidates();
 }
 
 function formatBridgeConnectError(

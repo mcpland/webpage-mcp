@@ -43,12 +43,39 @@ export function getNativeSocketPath(): string {
   return getDefaultUnixSocketPath();
 }
 
+export function hasExplicitNativeSocketConfig(): boolean {
+  return Boolean(process.env[SOCKET_ENV]?.trim() || process.env[SOCKET_DIR_ENV]?.trim());
+}
+
 /**
  * Longest Unix domain socket path in bytes (sockaddr_un.sun_path minus the
  * terminating NUL): 104 bytes on macOS/BSD, 108 on Linux.
  */
 export function getUnixSocketPathByteLimit(platform: NodeJS.Platform = process.platform): number {
   return platform === 'linux' ? 107 : 103;
+}
+
+export function isNativeSocketPathWithinLimit(
+  socketPath: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform === 'win32') return true;
+  return Buffer.byteLength(socketPath, 'utf8') <= getUnixSocketPathByteLimit(platform);
+}
+
+export function getNativeSocketPathCandidates(
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const primaryPath = getNativeSocketPath();
+  if (hasExplicitNativeSocketConfig()) {
+    return [primaryPath];
+  }
+
+  const legacyPath = getLegacyNativeSocketPath();
+  if (legacyPath === primaryPath || !isNativeSocketPathWithinLimit(legacyPath, platform)) {
+    return [primaryPath];
+  }
+  return [primaryPath, legacyPath];
 }
 
 /**

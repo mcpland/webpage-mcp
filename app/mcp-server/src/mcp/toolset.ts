@@ -1,4 +1,4 @@
-import { TOOL_NAMES } from 'webpage-mcp-shared';
+import { TOOL_NAMES, TOOL_SCHEMAS } from 'webpage-mcp-shared';
 
 /**
  * Tool profiles: which tools a client sees and may call.
@@ -13,10 +13,13 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 export const TOOLSET_ENV = 'WEBPAGE_MCP_TOOLSET';
 
 const WORKFLOW_RUN_TOOL_NAME = 'workflow_run';
+const PUBLIC_TOOL_NAMES = new Set<string>(TOOL_SCHEMAS.map((tool) => tool.name));
 
-const BROWSER_TOOL_NAMES: readonly string[] = Object.values(TOOL_NAMES.BROWSER);
+const BROWSER_TOOL_NAMES: readonly string[] = Object.values(TOOL_NAMES.BROWSER).filter((name) =>
+  PUBLIC_TOOL_NAMES.has(name),
+);
 const WORKFLOW_TOOL_NAMES: readonly string[] = [
-  ...Object.values(TOOL_NAMES.RECORD_REPLAY),
+  ...Object.values(TOOL_NAMES.RECORD_REPLAY).filter((name) => PUBLIC_TOOL_NAMES.has(name)),
   WORKFLOW_RUN_TOOL_NAME,
 ];
 
@@ -67,6 +70,7 @@ export function parseToolset(spec: string | undefined): Toolset {
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean);
+  if (entries.length === 0) return ALL_TOOLS;
   let includeAll = entries.every((entry) => entry.startsWith('-'));
   const added = new Set<string>();
   const removed = new Set<string>();
@@ -80,7 +84,11 @@ export function parseToolset(spec: string | undefined): Toolset {
       else includeAll = true;
       continue;
     }
-    const names = TOOLSET_PROFILES[name] ?? (KNOWN_TOOL_NAMES.has(name) ? [name] : undefined);
+    const names = Object.prototype.hasOwnProperty.call(TOOLSET_PROFILES, name)
+      ? TOOLSET_PROFILES[name]
+      : KNOWN_TOOL_NAMES.has(name)
+        ? [name]
+        : undefined;
     if (!names) {
       warnings.push(
         `unknown entry "${name}" ignored (profiles: all, ${Object.keys(TOOLSET_PROFILES).join(', ')}; or a tool name)`,
