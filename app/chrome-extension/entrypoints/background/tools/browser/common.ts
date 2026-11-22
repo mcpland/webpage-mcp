@@ -506,6 +506,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
     try {
       const explicitTab = await this.tryGetTab(tabId);
+      if (tabId !== undefined && !explicitTab &&
+          (refresh || url === 'back' || url === 'forward' || this.normalizeOpenMode(args, null) === 'current_tab')) {
+        return createErrorResponse(`Target tab ${tabId} is no longer available`);
+      }
 
       // Handle refresh option first
       if (refresh) {

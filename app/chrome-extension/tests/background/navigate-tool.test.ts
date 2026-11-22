@@ -92,6 +92,14 @@ describe('navigateTool', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps a queued current-tab navigation bound to its tab after it closes', async () => {
+    mocks.tabsGet.mockRejectedValueOnce(new Error('No tab'));
+    const result = await navigateTool.execute({ url: 'https://example.com/', tabId: 7, openMode: 'current_tab' });
+    expect(result.isError).toBe(true);
+    expect(mocks.tabsQuery).not.toHaveBeenCalled();
+    expect(mocks.tabsUpdate).not.toHaveBeenCalled();
+  });
+
   it('defaults URL navigation to opening a fresh new tab so existing tabs are not clobbered', async () => {
     const targetUrl = 'https://www.baidu.com';
     mocks.tabsCreate.mockResolvedValueOnce(

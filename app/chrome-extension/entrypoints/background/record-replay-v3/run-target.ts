@@ -188,6 +188,12 @@ export async function resolveRunTargetTab(
       : null;
   throwIfTargetAborted(input.signal);
 
+  // Public callers reserve the explicit tab's request queue for this run.
+  // Retargeting after the reservation could navigate a different caller's tab.
+  if (explicitTabId !== undefined && !explicitTab && enforcesPublicPageRestrictions(input.execution)) {
+    throw new Error(`Target tab ${explicitTabId} is no longer available`);
+  }
+
   if (explicitTab?.id !== undefined) {
     if (startUrl) {
       throwIfTargetAborted(input.signal);

@@ -241,11 +241,17 @@ async function resolveExecutionTarget(
 ): Promise<ResolvedExecutionTarget> {
   const hasExplicitTabId = typeof args?.tabId === 'number';
   const hasExplicitWindowId = typeof args?.windowId === 'number';
-  if (hasExplicitTabId || hasExplicitWindowId) {
-    return {
-      tabId: hasExplicitTabId ? args.tabId : undefined,
-      windowId: hasExplicitWindowId ? args.windowId : undefined,
-    };
+  if (hasExplicitTabId) {
+    const tabId = toolName === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN ? Math.floor(args.tabId) : args.tabId;
+    return { tabId, windowId: hasExplicitWindowId ? args.windowId : undefined };
+  }
+  if (hasExplicitWindowId) {
+    if (toolName === TOOL_NAMES.BROWSER.NAVIGATE && !shouldPreferWindowScopedExecution(toolName, args)) {
+      const [active] = await chrome.tabs.query({ active: true, windowId: args.windowId });
+      if (active?.id === undefined) throw new Error('Active tab not found');
+      return { tabId: active.id, windowId: args.windowId };
+    }
+    return { windowId: args.windowId };
   }
 
   const preferWindowScopedExecution = shouldPreferWindowScopedExecution(toolName, args);
@@ -453,16 +459,16 @@ export const handleCallTool = async (param: ToolCallParam) => {
 
   const sessionId = param.meta?.mcpSessionId?.trim() || undefined;
   const instanceId = param.meta?.instanceId?.trim() || undefined;
-  const resolvedTarget = await resolveExecutionTarget(param.name, param.args, sessionId, instanceId);
-  throwIfToolAborted(param.signal);
-  const targetMergedArgs = mergeArgsWithResolvedTarget(param.args, resolvedTarget);
-  const shouldApplyMcpBackgroundDefault = param.meta?.source === 'mcp' || !!sessionId;
-  const mergedArgs = shouldApplyMcpBackgroundDefault
-    ? await mergeArgsWithDefaultBackground(param.name, targetMergedArgs)
-    : targetMergedArgs;
-  throwIfToolAborted(param.signal);
-
   try {
+    const resolvedTarget = await resolveExecutionTarget(param.name, param.args, sessionId, instanceId);
+    throwIfToolAborted(param.signal);
+    const targetMergedArgs = mergeArgsWithResolvedTarget(param.args, resolvedTarget);
+    const shouldApplyMcpBackgroundDefault = param.meta?.source === 'mcp' || !!sessionId;
+    const mergedArgs = shouldApplyMcpBackgroundDefault
+      ? await mergeArgsWithDefaultBackground(param.name, targetMergedArgs)
+      : targetMergedArgs;
+    throwIfToolAborted(param.signal);
+
     const executionContext =
       param.signal ||
       (param.meta &&

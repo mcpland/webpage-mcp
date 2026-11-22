@@ -84,6 +84,16 @@ describe('resolveRunTargetTab background mode', () => {
     expect(tabsUpdate).toHaveBeenCalledWith(9, { url: 'https://example.com/next' });
   });
 
+  it('does not redirect a public flow to an unrelated active tab when its bound tab closes', async () => {
+    tabsGet.mockRejectedValue(new Error('No tab'));
+    tabsQuery.mockResolvedValue([tab({ id: 99 })]);
+    await expect(resolveRunTargetTab({
+      tabId: 7, startUrl: 'https://example.com/run', execution: { disallowLocalFilePages: true },
+    })).rejects.toThrow('Target tab 7 is no longer available');
+    expect(tabsUpdate).not.toHaveBeenCalled();
+    expect(tabsCreate).not.toHaveBeenCalled();
+  });
+
   it('rejects non-http startUrl values when public-page restrictions are enabled', async () => {
     await expect(
       resolveRunTargetTab({

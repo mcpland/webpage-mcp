@@ -526,6 +526,30 @@ describe('handleCallTool navigation routing', () => {
     expect(order).toEqual(['navigate', 'flow', 'read', 'screenshot']);
   });
 
+  it('queues navigation addressed by window with a flow on its active tab', async () => {
+    mocks.tabsQuery.mockResolvedValue([{ id: 10, windowId: 55, active: true }]);
+    let finish!: () => void;
+    mocks.navigateExecute.mockImplementation(async () => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { content: [] };
+    });
+    const navigation = handleCallTool({
+      name: TOOL_NAMES.BROWSER.NAVIGATE, meta: { source: 'mcp' },
+      args: { windowId: 55, openMode: 'current_tab', url: 'https://example.com/slow' },
+    });
+    await vi.waitFor(() => expect(mocks.navigateExecute).toHaveBeenCalled());
+    const flow = handleCallTool({
+      name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN, meta: { source: 'mcp' }, args: { flowId: 'flow-1', tabId: 10 },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.tabsQuery).toHaveBeenCalledWith({ active: true, windowId: 55 });
+    expect(mocks.navigateExecute).toHaveBeenCalledWith(expect.objectContaining({ tabId: 10 }));
+    expect(mocks.flowRunExecute).not.toHaveBeenCalled();
+    finish();
+    await Promise.all([navigation, flow]);
+    expect(mocks.flowRunExecute).toHaveBeenCalledOnce();
+  });
+
   it('passes the call signal to the per-tab queue', async () => {
     const controller = new AbortController();
     mocks.clickExecute.mockResolvedValue({ content: [], isError: false });
