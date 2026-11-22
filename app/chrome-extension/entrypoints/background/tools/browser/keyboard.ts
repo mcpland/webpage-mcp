@@ -8,6 +8,8 @@ import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { dispatchKeyStroke, parseKeyboardInput, type KeyboardStep } from '@/utils/cdp-keyboard';
 import {
   PageUnresponsiveError,
+  isTimeoutError,
+  withTimeout,
   pendingDialogHint,
   runCdpInputWithDialogs,
   type CdpInputResult,
@@ -92,13 +94,23 @@ class KeyboardTool extends BaseBrowserToolExecutor {
     delay: number,
     selector?: string,
     frameId?: number,
+    dialog?: DialogResponse,
   ): Promise<ToolResult> {
+    if (dialog) {
+      return createErrorResponse('Automatic dialog responses require a debugger connection. No fallback keys were sent.');
+    }
+    const timeoutMs = 5000 + Math.max(0, delay) * Math.max(0, steps.length - 1);
+    const deadline = Date.now() + timeoutMs;
     try {
       const frames = typeof frameId === 'number' ? [frameId] : undefined;
-      await this.injectContentScript(tabId, ['inject-scripts/keyboard-helper.js'], false, 'ISOLATED', false, frames);
-      const result = await this.sendMessageToTab(tabId, {
-        action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD, keys, steps, selector, delay,
-      }, frameId);
+      const dispatch = async () => {
+        await this.injectContentScript(tabId, ['inject-scripts/keyboard-helper.js'], false, 'ISOLATED', false, frames);
+        if (Date.now() >= deadline) throw new Error('Keyboard helper timed out before dispatch');
+        return this.sendMessageToTab(tabId, {
+          action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD, keys, steps, selector, delay, deadline,
+        }, frameId);
+      };
+      const result = await withTimeout(dispatch(), timeoutMs, 'Keyboard helper');
       if (!result?.success || result.error) {
         return createErrorResponse(result?.error || result?.message || 'Keyboard helper failed');
       }
@@ -109,6 +121,9 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         isError: false,
       };
     } catch (error) {
+      if (isTimeoutError(error)) {
+        return createErrorResponse('Keyboard helper timed out. A dialog may be open; check the page before retrying.');
+      }
       return createErrorResponse(`Keyboard helper failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -253,7 +268,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         );
         return this.sendHelperSteps(
           targetTabId, keys, parseKeyboardInput(keys), delay,
-          refForFocus ? undefined : finalSelector, targetFrameId,
+          refForFocus ? undefined : finalSelector, targetFrameId, dialogResponse,
         );
       }
 

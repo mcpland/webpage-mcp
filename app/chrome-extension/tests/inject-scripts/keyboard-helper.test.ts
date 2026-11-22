@@ -161,6 +161,19 @@ describe('keyboard-helper page protocol', () => {
     expect((await sendKeys(listener, 'hello')).success).toBe(false);
   });
 
+  it('abandons the edit if a beforeinput listener returns after the deadline', async () => {
+    const field = document.createElement('input');
+    document.body.append(field);
+    field.focus();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100);
+    field.addEventListener('beforeinput', () => now.mockReturnValue(200));
+    const result = await dispatch(executeHelper(), {
+      action: 'simulateKeyboard', keys: 'ab', steps: parseKeyboardInput('ab'), deadline: 150,
+    });
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining('expired') });
+    expect(field.value).toBe('');
+  });
+
   it('initializes once and answers the synchronous health check', async () => {
     const listener = executeHelper();
     executeHelper(false);

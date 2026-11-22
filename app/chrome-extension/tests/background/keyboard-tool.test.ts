@@ -274,9 +274,30 @@ describe('keyboardTool', () => {
         keys: 'Enter',
         selector: undefined,
         delay: 50,
+        deadline: expect.any(Number),
       },
       12,
     );
+  });
+
+  it('returns a bounded error while a fallback key is blocked by a modal', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(keyboardTool as any, 'injectContentScript').mockResolvedValue(undefined);
+      vi.spyOn(keyboardTool as any, 'sendMessageToTab').mockReturnValue(new Promise(() => {}));
+      const pending = keyboardTool.sendHelperSteps(7, 'Enter', [], 0);
+      await vi.advanceTimersByTimeAsync(5100);
+      expect((await pending).content[0]).toMatchObject({ text: expect.stringContaining('dialog may be open') });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not dispatch fallback keys when an automatic dialog response was requested', async () => {
+    const inject = vi.spyOn(keyboardTool as any, 'injectContentScript');
+    const result = await keyboardTool.sendHelperSteps(7, 'Enter', [], 0, undefined, undefined, { action: 'accept' });
+    expect(result.isError).toBe(true);
+    expect(inject).not.toHaveBeenCalled();
   });
 
   it('surfaces a failed helper result even when it only has a message', async () => {
