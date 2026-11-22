@@ -549,6 +549,17 @@ cd app/chrome-extension && pnpm test
 cd app/mcp-server && pnpm test
 ```
 
+The browser e2e suite drives the built extension and MCP server through real tool calls in Chrome
+for Testing (branded Chrome ignores `--load-extension`) against local fixture pages. It runs in an
+isolated temp profile, HOME and native host socket, so your own Chrome and `~/.webpage-mcp` are
+untouched:
+
+```bash
+pnpm build:shared && pnpm build:mcp && pnpm build:extension
+WEBPAGE_MCP_CHROME_BINARY=/path/to/chrome-for-testing pnpm test:e2e:browser
+# A subset, with the browser visible: ... pnpm test:e2e:browser dialogs iframe-refs --headful
+```
+
 ### Linting & Formatting
 
 ```bash
