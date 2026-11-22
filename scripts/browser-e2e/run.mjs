@@ -200,6 +200,45 @@ const scenarios = {
     );
   },
 
+  async "dialog-chain"(t) {
+    const tabId = await t.open("/dialog-chain");
+    // Answered in one call: the confirm and the alert it leads to.
+    const auto = await t.call("chrome_click_element", {
+      tabId,
+      selector: "#chain",
+      dialog: "accept",
+    });
+    assert.deepEqual(
+      (auto.json?.dialogs ?? []).map((d) => `${d.type}:${d.handled}`),
+      ["confirm:accept", "alert:accept"],
+      auto.text,
+    );
+    assert.ok(
+      await t.pageLog("/dialog-chain", "chain-done", (d) => d.ok === true),
+    );
+
+    // Answered one at a time: chrome_handle_dialog reports the follow-up.
+    t.fixtures.clearLogs();
+    const click = await t.call("chrome_click_element", {
+      tabId,
+      selector: "#chain",
+    });
+    assert.equal(click.json?.dialog?.type, "confirm", click.text);
+    const first = await t.call("chrome_handle_dialog", {
+      tabId,
+      action: "dismiss",
+    });
+    assert.equal(first.json?.nextDialog?.type, "alert", first.text);
+    const second = await t.call("chrome_handle_dialog", {
+      tabId,
+      action: "accept",
+    });
+    assert.ok(second.ok, second.text);
+    assert.ok(
+      await t.pageLog("/dialog-chain", "chain-done", (d) => d.ok === false),
+    );
+  },
+
   async screenshot(t) {
     const tabId = await t.open("/simple");
     const shot = await t.call("chrome_screenshot", { tabId });
@@ -241,6 +280,43 @@ const scenarios = {
     );
     const stop = await t.call("chrome_network_capture", { action: "stop" });
     assert.equal(stop.ok, false, "the one-shot capture did not keep running");
+  },
+
+  async "network-capture-debugger-from-new-tab-page"(t) {
+    const tabIds = async () =>
+      (await t.call("get_windows_and_tabs", {})).json.windows.flatMap((w) =>
+        w.tabs.map((tab) => tab.tabId),
+      );
+    const before = new Set(await tabIds());
+    // The debugger cannot attach to chrome:// pages; the capture has to move
+    // the tab to a blank page first and still see the page's first request.
+    await globalThis.fetch(
+      `http://127.0.0.1:${t.chromePort}/json/new?chrome://newtab/`,
+      {
+        method: "PUT",
+      },
+    );
+    const tabId = await waitFor(async () =>
+      (await tabIds()).find((id) => !before.has(id)),
+    );
+    assert.equal(typeof tabId, "number", "the new tab page is listed");
+    const capture = await t.call("chrome_network_capture", {
+      action: "start",
+      tabId,
+      url: `${t.base}/polling`,
+      durationMs: 2500,
+      needResponseBody: true,
+    });
+    assert.ok(capture.ok, capture.text);
+    assert.notEqual(capture.json?.redacted, true, capture.text);
+    assert.match(String(capture.json?.tabUrl), /\/polling$/);
+    const urls = (capture.json?.requests ?? []).map((request) =>
+      String(request.url),
+    );
+    assert.ok(
+      urls.some((url) => url.endsWith("/api/ping?i=0")),
+      urls.join("\n"),
+    );
   },
 
   async "switch-tab-by-url-or-title"(t) {
@@ -346,13 +422,14 @@ const scenarios = {
   },
 };
 
-function makeContext({ client, fixtures, env }) {
+function makeContext({ client, fixtures, env, chromePort }) {
   const call = (name, args, timeoutMs) =>
     callTool(client, name, args, timeoutMs);
   return {
     client,
     fixtures,
     env,
+    chromePort,
     base: fixtures.base,
     call,
     async open(pathname) {
@@ -440,7 +517,12 @@ async function main() {
     await routeDownloads(chrome.port, env.downloads);
     await connectNativeHost(chrome.port, env.extensionId);
     client = await connectMcpClient(env);
-    const context = makeContext({ client, fixtures, env });
+    const context = makeContext({
+      client,
+      fixtures,
+      env,
+      chromePort: chrome.port,
+    });
 
     for (const name of selected.length > 0
       ? selected

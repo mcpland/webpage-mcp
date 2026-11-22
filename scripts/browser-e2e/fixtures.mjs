@@ -97,6 +97,13 @@ const PAGES = {
     LOGGER,
   ),
 
+  // A confirm whose handler opens an alert shortly after it is answered.
+  "/dialog-chain": page(
+    "Dialog chain",
+    `<button id="chain" onclick="const ok = confirm('Delete item?'); setTimeout(() => { alert(ok ? 'Deleted' : 'Kept'); __log('chain-done', { ok }); }, 50)">Delete</button>`,
+    LOGGER,
+  ),
+
   "/download": page(
     "Download",
     `<a id="dl" href="/file.txt" download="report.txt">Download report</a>`,
