@@ -1,3 +1,4 @@
+import { PendingInheritedCaptures } from './network-capture-inheritance';
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
@@ -143,10 +144,11 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
     number,
     {
       promise: Promise<{ success: boolean; message?: string; data?: any }>;
+      rootTabId: number;
       markExplicitStop: () => void;
     }
   >();
-  private pendingInheritedTabs = new Set<number>();
+  private pendingInheritedTabs = new PendingInheritedCaptures();
   public static MAX_REQUESTS_PER_CAPTURE = LIMITS.MAX_NETWORK_REQUESTS; // Maximum capture request count
   private listeners: NetworkCaptureListeners = {};
 
@@ -231,8 +233,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       if (!openerCaptureInfo) return;
       if (
         openerCaptureInfo.lineageDepth >= NETWORK_CAPTURE_LIMITS.maxLineageDepth ||
-        this.captureData.size + this.pendingInheritedTabs.size >= NETWORK_CAPTURE_LIMITS.maxTabs ||
-        this.pendingInheritedTabs.has(newTabId) ||
+        !this.pendingInheritedTabs.canStart(newTabId, this.captureData.size) ||
         Date.now() >= openerCaptureInfo.deadlineAt
       ) {
         return;
@@ -240,12 +241,10 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       console.log(
         `NetworkCaptureV2: New tab ${newTabId} created from capturing tab ${openerTabId}, will extend capture to it.`,
       );
-      this.pendingInheritedTabs.add(newTabId);
-
-      try {
+      await this.pendingInheritedTabs.run(newTabId, openerCaptureInfo.rootTabId, async (signal) => {
         // Wait a short time to ensure the tab is ready
         await new Promise((resolve) => setTimeout(resolve, 500));
-        if (this.captureData.get(openerTabId) !== openerCaptureInfo) {
+        if (signal.aborted || this.captureData.get(openerTabId) !== openerCaptureInfo) {
           return;
         }
         const remainingMs = openerCaptureInfo.deadlineAt - Date.now();
@@ -257,6 +256,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
         }
 
         await this.startCaptureForTab(newTabId, {
+          signal,
           maxCaptureTime: remainingMs,
           inactivityTimeout: Math.min(openerCaptureInfo.inactivityTimeout, remainingMs),
           includeStatic: openerCaptureInfo.includeStatic,
@@ -264,9 +264,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
           lineageDepth: openerCaptureInfo.lineageDepth + 1,
           deadlineAt: openerCaptureInfo.deadlineAt,
         });
-      } finally {
-        this.pendingInheritedTabs.delete(newTabId);
-      }
+      });
 
       console.log(`NetworkCaptureV2: Successfully extended capture to new tab ${newTabId}`);
     } catch (error) {
@@ -458,15 +456,16 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
   }
 
   public hasAvailableCapture(): boolean {
-    return this.getAvailableTabIds().length > 0;
+    return this.pendingInheritedTabs.size > 0 || this.getAvailableTabIds().length > 0;
   }
 
   public async stopLineageCaptures(rootTabId: number): Promise<void> {
     this.pruneCompletedCaptures();
-    const childTabIds: number[] = [];
-    for (const [tabId, info] of this.captureData) {
-      if (tabId !== rootTabId && info?.rootTabId === rootTabId) {
-        childTabIds.push(tabId);
+    const cleanup: Promise<unknown>[] = [this.pendingInheritedTabs.cancel(rootTabId)];
+    const children = new Set<number>();
+    for (const captures of [this.captureData, this.stoppingCaptures]) {
+      for (const [tabId, capture] of captures) {
+        if (tabId !== rootTabId && capture.rootTabId === rootTabId) children.add(tabId);
       }
     }
     for (const [tabId, completed] of this.completedCaptures) {
@@ -474,16 +473,8 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
         this.completedCaptures.delete(tabId);
       }
     }
-    for (const childTabId of childTabIds) {
-      try {
-        await this.stopCapture(childTabId);
-      } catch (error) {
-        console.warn(
-          `NetworkCaptureV2: Error stopping inherited capture for tab ${childTabId}:`,
-          error,
-        );
-      }
-    }
+    for (const child of children) cleanup.push(this.stopCapture(child));
+    await Promise.all(cleanup);
   }
 
   /**
@@ -773,6 +764,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       maxCaptureTime: number;
       inactivityTimeout: number;
       includeStatic: boolean;
+      signal?: AbortSignal;
       rootTabId?: number;
       lineageDepth?: number;
       deadlineAt?: number;
@@ -804,6 +796,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
     try {
       // Get tab information
       const tab = await chrome.tabs.get(tabId);
+      options.signal?.throwIfAborted();
       this.completedCaptures.delete(tabId);
 
       // Initialize capture data
@@ -853,7 +846,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       console.error(`NetworkCaptureV2: Error starting capture for tab ${tabId}:`, error);
 
       // Clean up resources
-      if (this.captureData.has(tabId)) {
+      if (!options.signal?.aborted && this.captureData.has(tabId)) {
         this.cleanupCapture(tabId);
       }
 
@@ -983,6 +976,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
 
     const entry = {
       promise: stopPromise,
+      rootTabId: captureInfo.rootTabId,
       markExplicitStop: () => {
         explicitStopJoined = true;
       },

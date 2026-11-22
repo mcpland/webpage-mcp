@@ -134,7 +134,7 @@ describe('network capture backend boundaries', () => {
       maxTotalBufferSize: NETWORK_CAPTURE_LIMITS.maxCaptureBytes,
       maxResourceBufferSize: NETWORK_CAPTURE_LIMITS.maxResponseBodyBytes,
       maxPostDataSize: NETWORK_CAPTURE_LIMITS.maxRequestBodyBytes,
-    });
+    }, undefined);
 
     (networkDebuggerStartTool as any).handleRequestWillBeSent(7, {
       requestId: 'request-1',
@@ -209,6 +209,44 @@ describe('network capture backend boundaries', () => {
     expect(autoResult.success).toBe(true);
     expect(explicitResult.success).toBe(true);
     expect(networkDebuggerStartTool.hasAvailableCapture()).toBe(false);
+  });
+
+  it.each(['debugger', 'webRequest'])('cancels an in-flight child start in %s mode', async (mode) => {
+    const backend = mode === 'debugger'
+      ? (await import('@/entrypoints/background/tools/browser/network-capture-debugger')).networkDebuggerStartTool
+      : (await import('@/entrypoints/background/tools/browser/network-capture-web-request')).networkCaptureStartTool;
+    await (backend as any).startCaptureForTab(7, {
+      maxCaptureTime: 30_000, inactivityTimeout: 10_000, includeStatic: true,
+    });
+    let started!: () => void;
+    const starting = new Promise<void>((resolve) => { started = resolve; });
+    let finishRead!: () => void;
+    if (mode === 'debugger') {
+      cdp.sendCommand.mockImplementation(async (id, method, _params, signal) => {
+        if (id !== 8 || method !== 'Network.enable') return {};
+        started();
+        return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+      });
+    } else {
+      vi.mocked(chrome.tabs.get).mockImplementation(async (id) => {
+        if (id === 8) {
+          started();
+          await new Promise<void>((resolve) => { finishRead = resolve; });
+        }
+        return tab(id);
+      });
+    }
+    const child = (backend as any).handleTabCreated({ id: 8, openerTabId: 7 });
+    await starting;
+    await backend.stopCapture(7);
+    const stopped = backend.stopLineageCaptures(7);
+    finishRead?.();
+    await Promise.all([child, stopped]);
+    expect(backend.hasAvailableCapture()).toBe(false);
+    if (mode === 'debugger') {
+      expect(cdp.sendCommand).toHaveBeenCalledWith(8, 'Network.disable');
+      expect(cdp.detach).toHaveBeenCalledWith(8, 'network-capture');
+    }
   });
 
   it('stops inherited child captures when stopLineageCaptures is called', async () => {
