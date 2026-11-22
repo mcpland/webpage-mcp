@@ -53,6 +53,27 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: st
   });
 }
 
+// Chrome cannot cancel an individual command. Stop awaiting its reply in the
+// session manager as well, so its lease is released even if the renderer stays blocked.
+export async function sendTimedDialogCommand(
+  tabId: number,
+  method: string,
+  params: object | undefined,
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  const controller = new AbortController();
+  try {
+    await withTimeout(
+      cdpSessionManager.sendCommand(tabId, method, params, controller.signal),
+      timeoutMs,
+      label,
+    );
+  } finally {
+    controller.abort();
+  }
+}
+
 export function isTimeoutError(error: unknown): boolean {
   return error instanceof Error && error.name === 'InputTimeoutError';
 }
@@ -84,13 +105,15 @@ export async function answerDialog(
   response: DialogResponse,
   dialog = dialogTracker.get(tabId),
 ): Promise<void> {
-  await withTimeout(
-    cdpSessionManager.sendCommand(tabId, 'Page.handleJavaScriptDialog', {
+  await sendTimedDialogCommand(
+    tabId,
+    'Page.handleJavaScriptDialog',
+    {
       accept: response.action === 'accept',
       ...(response.action === 'accept' && response.promptText !== undefined
         ? { promptText: response.promptText }
         : {}),
-    }),
+    },
     DIALOG_ANSWER_TIMEOUT_MS,
     'Answering the JavaScript dialog',
   );
@@ -110,8 +133,10 @@ export async function runCdpInputWithDialogs(
   let watcher = dialogTracker.waitForDialog(tabId);
   try {
     try {
-      await withTimeout(
-        cdpSessionManager.sendCommand(tabId, 'Page.enable'),
+      await sendTimedDialogCommand(
+        tabId,
+        'Page.enable',
+        undefined,
         PAGE_ENABLE_TIMEOUT_MS,
         'Page.enable',
       );

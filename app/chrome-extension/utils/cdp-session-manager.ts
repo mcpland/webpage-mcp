@@ -1,4 +1,4 @@
-type OwnerTag = string;
+type OwnerTag = string | symbol;
 
 interface TabSessionState {
   owners: Map<OwnerTag, number>;
@@ -271,21 +271,35 @@ export class CDPSessionManager {
     tabId: number,
     method: string,
     params?: object,
+    signal?: AbortSignal,
   ): Promise<T> {
-    const owner = `send:${method}`;
+    signal?.throwIfAborted();
+    const owner = Symbol(`send:${method}`);
+    const send = async (): Promise<T> => {
+      signal?.throwIfAborted();
+      const reply = this.getDebuggerApi().sendCommand({ tabId }, method, params) as Promise<T>;
+      if (!signal) return reply;
+      let onAbort!: () => void;
+      const aborted = new Promise<never>((_, reject) => {
+        onAbort = () => reject(signal.reason);
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+      try {
+        return await Promise.race([reply, aborted]);
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
+    };
+
     await this.attach(tabId, owner);
     let commandState = this.getState(tabId);
     let hasCommandLease = true;
 
     try {
       try {
-        return (await this.getDebuggerApi().sendCommand(
-          { tabId },
-          method,
-          params,
-        )) as T;
+        return await send();
       } catch (error) {
-        if (!isDefinitelyDetachedError(error)) {
+        if (signal?.aborted || !isDefinitelyDetachedError(error)) {
           throw error;
         }
 
@@ -295,11 +309,7 @@ export class CDPSessionManager {
         await this.attach(tabId, owner);
         commandState = this.getState(tabId);
         hasCommandLease = true;
-        return (await this.getDebuggerApi().sendCommand(
-          { tabId },
-          method,
-          params,
-        )) as T;
+        return await send();
       }
     } finally {
       if (hasCommandLease) {

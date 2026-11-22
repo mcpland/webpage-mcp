@@ -90,10 +90,9 @@ describe('handleDialogTool', () => {
     expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'Page.handleJavaScriptDialog', {
       accept: true,
       promptText: 'Ada',
-    });
+    }, expect.any(AbortSignal));
     // Page.enable blocks while a dialog holds the renderer.
-    expect(mocks.sendCommand).not.toHaveBeenCalledWith(7, 'Page.enable', expect.anything());
-    expect(mocks.sendCommand).not.toHaveBeenCalledWith(7, 'Page.enable');
+    expect(mocks.sendCommand.mock.calls.map((call) => call[1])).not.toContain('Page.enable');
   });
 
   it('explains an untracked dialog that keeps the page blocked', async () => {

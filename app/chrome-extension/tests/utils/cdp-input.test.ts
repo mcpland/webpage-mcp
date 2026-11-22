@@ -48,7 +48,7 @@ describe('runCdpInputWithDialogs', () => {
     const result = await runCdpInputWithDialogs(7, 'click', dispatch, { graceMs: 0 });
 
     expect(result).toEqual({});
-    expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'Page.enable');
+    expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'Page.enable', undefined, expect.any(AbortSignal));
     expect(dispatch).toHaveBeenCalledOnce();
     expect(mocks.attach).toHaveBeenCalledWith(7, 'click');
     expect(mocks.detach).toHaveBeenCalledWith(7, 'click');
@@ -91,7 +91,7 @@ describe('runCdpInputWithDialogs', () => {
     expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'Page.handleJavaScriptDialog', {
       accept: true,
       promptText: 'Ada',
-    });
+    }, expect.any(AbortSignal));
     expect(result.dialog).toEqual({ type: 'prompt', message: 'Name?', handled: 'accept' });
     expect(dialogTracker.get(7)).toBeUndefined();
   });

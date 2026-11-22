@@ -2,7 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
-import { answerDialog, isTimeoutError, withTimeout } from '@/utils/cdp-input';
+import { answerDialog, isTimeoutError, sendTimedDialogCommand } from '@/utils/cdp-input';
 import { describeDialog, dialogTracker, type PendingDialog } from '@/utils/dialog-tracker';
 import { hasDisallowedPublicUrlScheme } from './common';
 
@@ -24,11 +24,13 @@ const UNTRACKED_DIALOG_MESSAGE =
 /** True when the page's main thread still answers the debugger. */
 async function isPageResponsive(tabId: number): Promise<boolean> {
   try {
-    await withTimeout(
-      cdpSessionManager.sendCommand(tabId, 'Runtime.evaluate', {
+    await sendTimedDialogCommand(
+      tabId,
+      'Runtime.evaluate',
+      {
         expression: '1',
         returnByValue: true,
-      }),
+      },
       RESPONSIVENESS_PROBE_TIMEOUT_MS,
       'Page responsiveness probe',
     );
