@@ -349,8 +349,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
         },
         target.frameId,
       );
-      const point = getResolvedViewportCoordinates(resolved, target.frameId);
-      return point ? project(point) : undefined;
+      return getResolvedViewportCoordinates(resolved, target.frameId);
     };
 
     const resolveSelectorPoint = async (
@@ -414,7 +413,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
         return undefined;
       }
       return {
-        point: project(fallbackPoint)!,
+        point: fallbackPoint,
         frameId: resolvedFrameId,
         ref: resolvedRef,
       };

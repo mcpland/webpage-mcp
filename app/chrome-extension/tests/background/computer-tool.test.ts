@@ -4,6 +4,8 @@ import { computerTool } from '@/entrypoints/background/tools/browser/computer';
 import { clickTool, fillTool } from '@/entrypoints/background/tools/browser/interaction';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
+import { screenshotContextManager } from '@/utils/screenshot-context';
+
 const nativeMouseEvent = window.MouseEvent;
 
 function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
@@ -107,6 +109,33 @@ describe('computerTool', () => {
     expect(payload.results[1]).toMatchObject({ selector: '#missing', ok: false });
     expect(payload.results[2]).toEqual({ ok: false, error: 'missing ref or selector' });
     expect(fill.mock.calls[1][0]).toMatchObject({ selector: '#missing' });
+  });
+
+  it.each([
+    [{ ref: 'ref_7' }, 1000, 500],
+    [{ selector: '#target' }, 1000, 500],
+    [{ coordinates: { x: 784, y: 441 } }, 960, 540],
+  ] as const)('projects only screenshot coordinates when hovering with %o', async (target, x, y) => {
+    vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(computerTool as any, 'injectAccessibilityHelper').mockResolvedValue(undefined);
+    vi.spyOn(computerTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true, viewportCenter: { x: 1000, y: 500 },
+    });
+    vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
+    const send = vi.spyOn(cdpSessionManager, 'sendCommand').mockResolvedValue({});
+    screenshotContextManager.setContext(7, {
+      screenshotWidth: 1568, screenshotHeight: 882, viewportWidth: 1920, viewportHeight: 1080,
+    });
+    try {
+      const result = await computerTool.execute({
+        tabId: 7, action: 'hover', duration: 0, background: true, ...target,
+      });
+      expect(result.isError).toBe(false);
+      expect(send).toHaveBeenCalledWith(7, 'Input.dispatchMouseEvent', expect.objectContaining({ x, y }));
+    } finally {
+      screenshotContextManager.clear(7);
+    }
   });
 
   it('scrolls at the viewport center when no coordinates or ref are given', async () => {
