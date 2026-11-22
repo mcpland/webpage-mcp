@@ -380,6 +380,24 @@ const scenarios = {
     assert.equal(await t.value(tabId, "#name"), "Ada");
   },
 
+  async "submit-interrupted-by-focus-dialog"(t) {
+    for (const [tool, args] of [
+      ["chrome_fill_or_select", { selector: "#target", value: "test" }],
+      ["chrome_computer", { action: "fill_form", elements: [{ selector: "#target", value: "test" }] }],
+    ]) {
+      const tabId = await t.open("/submit-focus-dialog");
+      const result = await t.call(tool, { ...args, tabId, submit: true });
+      assert.equal(result.json?.dialog?.handled, false, result.text);
+      await t.call("chrome_handle_dialog", { tabId, action: "accept" });
+      assert.equal(result.json?.submitted, false, result.text);
+      const actual = await t.call("chrome_javascript", {
+        tabId,
+        code: "return document.body.dataset.submitted || 'no'",
+      });
+      assert.equal(actual.json?.result, "no", actual.text);
+    }
+  },
+
   async "page-change-summary"(t) {
     let tabId = await t.open("/links");
     const blank = await t.call("chrome_click_element", {

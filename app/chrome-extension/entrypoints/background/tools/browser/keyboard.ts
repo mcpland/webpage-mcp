@@ -75,21 +75,26 @@ export async function dispatchKeySequence(
  * a JavaScript dialog they open as `dialog` says. Used to submit a field
  * right after filling it, in the same tool call.
  */
-export function pressKeysOnFocusedElement(
+export async function pressKeysOnFocusedElement(
   tabId: number,
   keys: string,
   focusTarget: () => Promise<void>,
   dialog?: DialogResponse,
-): Promise<CdpInputResult> {
-  return runCdpInputWithDialogs(
+): Promise<CdpInputResult & { submitted: boolean }> {
+  let submitted = false;
+  const input = await runCdpInputWithDialogs(
     tabId,
     'keyboard',
     async (signal) => {
       await focusTarget();
-      if (!signal.aborted) await dispatchKeySequence(tabId, keys, 0, signal);
+      if (signal.aborted) return;
+      // A dialog may interrupt focus before Enter, or be opened by Enter itself.
+      submitted = true;
+      await dispatchKeySequence(tabId, keys, 0, signal);
     },
     { dialog },
   );
+  return { ...input, submitted };
 }
 
 /**

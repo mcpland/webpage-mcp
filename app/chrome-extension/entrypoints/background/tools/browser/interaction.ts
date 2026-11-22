@@ -631,7 +631,7 @@ interface FillToolParams {
 class FillTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.FILL;
 
-  async submitFilledElement(tabId: number, frameId: number | undefined, token: string, dialog?: DialogResponse) {
+  async submitFilledElement(tabId: number, frameId: number | undefined, token: string, dialog?: DialogResponse): Promise<CdpInputResult & { submitted: boolean }> {
     const focusTarget = async () => {
       const result = await this.sendMessageToTab(tabId, { action: 'focusFilledTarget', submitToken: token }, frameId);
       if (!result?.success) throw new Error('The filled field could not retain focus for submit');
@@ -644,7 +644,7 @@ class FillTool extends BaseBrowserToolExecutor {
         frameId, submitToken: token,
       });
       if (fallback.isError) throw new Error(fallback.content.find((block) => block.type === 'text')?.text || 'submit failed');
-      return undefined;
+      return { submitted: true };
     }
   }
 
@@ -771,7 +771,7 @@ class FillTool extends BaseBrowserToolExecutor {
         return createErrorResponse(result.error);
       }
 
-      let submitInput: CdpInputResult | undefined;
+      let submitInput: Awaited<ReturnType<typeof this.submitFilledElement>> | undefined;
       if (args.submit === true && submitToken) {
         try {
           submitInput = await this.submitFilledElement(targetTabId, frameId, submitToken, dialogResponse);
@@ -789,10 +789,10 @@ class FillTool extends BaseBrowserToolExecutor {
             text: JSON.stringify({
               success: true,
               message: pendingDialog
-                ? `Filled and submitted. ${pendingDialogHint(pendingDialog)}`
+                ? `${submitInput?.submitted ? 'Filled and submitted.' : 'Filled without submitting.'} ${pendingDialogHint(pendingDialog)}`
                 : result.message || 'Fill operation successful',
               elementInfo: result.elementInfo,
-              ...(args.submit === true ? { submitted: true } : {}),
+              ...(submitInput ? { submitted: submitInput.submitted } : {}),
               ...(submitInput?.dialog ? { dialog: submitInput.dialog } : {}),
               ...(submitInput?.dialogs ? { dialogs: submitInput.dialogs } : {}),
             }),

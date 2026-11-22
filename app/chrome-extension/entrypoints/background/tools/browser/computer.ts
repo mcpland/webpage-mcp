@@ -1254,7 +1254,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
         const successCount = results.filter((r) => r.ok).length;
         // Submit with Enter in the last field (filled with keepFocus), and
         // only when every field was filled: a half-filled form stays unsent.
-        let submitInput: CdpInputResult | undefined;
+        let submitInput: Awaited<ReturnType<typeof fillTool.submitFilledElement>> | undefined;
         let submitError: string | undefined;
         if (submitToken) {
           if (successCount !== results.length) {
@@ -1283,7 +1283,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           total: results.length,
           results,
           ...(params.submit === true
-            ? { submitted: !submitError, ...(submitError ? { submitError } : {}) }
+            ? { submitted: submitInput?.submitted === true, ...(submitError ? { submitError } : {}) }
             : {}),
         };
         return {

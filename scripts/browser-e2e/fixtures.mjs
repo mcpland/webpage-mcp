@@ -65,6 +65,16 @@ const PAGES = {
     LOGGER,
   ),
 
+  "/submit-focus-dialog": page(
+    "Focus before submit",
+    `<form onsubmit="event.preventDefault(); document.body.dataset.submitted = 'yes'">
+      <input id="target" oninput="this.form.other.focus()"
+        onfocus="if (this.value) alert('Refocusing field')" />
+      <input name="other" />
+      <button>Submit</button>
+    </form>`,
+  ),
+
   "/realform": page(
     "Search",
     `<form action="/submitted" method="get"><input id="q" name="q" /><button>Go</button></form>`,
