@@ -98,6 +98,8 @@ export function waitForDownload(opts: WaitForDownloadOptions): Promise<any> {
     let settled = false;
     // A specific in-progress download we are waiting to finish.
     let awaitedId: number | undefined;
+    // A new download can acquire its final matching filename in a later onChanged event.
+    const createdSinceArming = onlyNew ? new Set<number>() : undefined;
 
     const cleanup = () => {
       if (timer) clearTimeout(timer);
@@ -165,12 +167,14 @@ export function waitForDownload(opts: WaitForDownloadOptions): Promise<any> {
     };
     const onCreated = (item: chrome.downloads.DownloadItem) => {
       try {
+        createdSinceArming?.add(item.id);
         consider(item);
       } catch {}
     };
     const onChanged = (delta: chrome.downloads.DownloadDelta) => {
       try {
         if (!delta || typeof delta.id !== 'number') return;
+        if (createdSinceArming && !createdSinceArming.has(delta.id)) return;
         chrome.downloads
           .search({ id: delta.id })
           .then((arr) => {

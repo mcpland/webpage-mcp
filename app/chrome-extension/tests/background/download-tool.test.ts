@@ -39,6 +39,26 @@ describe('handleDownloadTool', () => {
     vi.restoreAllMocks();
   });
 
+  it.each(['in_progress', 'complete'] as const)(
+    'onlyNew ignores a preexisting %s download while waiting for a new filename',
+    async (state) => {
+      const oldItem = { id: 21, filename: 'report.txt', state };
+      const newItem = { id: 22, filename: '', state: 'in_progress' };
+      const search = chrome.downloads.search as ReturnType<typeof vi.fn>;
+      search.mockImplementation(async ({ id }) =>
+        id === 21 ? [oldItem] : [{ ...newItem, filename: 'report.txt', state: 'complete' }],
+      );
+      const pending = waitForDownload({
+        filenameContains: 'report', onlyNew: true, waitForComplete: true, timeoutMs: 1000,
+      });
+      changedListener?.({ id: 21 } as chrome.downloads.DownloadDelta);
+      await Promise.resolve();
+      createdListener?.(newItem as chrome.downloads.DownloadItem);
+      changedListener?.({ id: 22 } as chrome.downloads.DownloadDelta);
+      await expect(pending).resolves.toMatchObject({ id: 22, filename: 'report.txt' });
+    },
+  );
+
   it('redacts local download paths to a basename before returning', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-30T00:00:00.000Z'));
