@@ -82,7 +82,7 @@ function outcome(dialog: PendingDialog, handled: DialogOutcome['handled']): Dial
 export async function answerDialog(
   tabId: number,
   response: DialogResponse,
-  dialog?: PendingDialog,
+  dialog = dialogTracker.get(tabId),
 ): Promise<void> {
   await withTimeout(
     cdpSessionManager.sendCommand(tabId, 'Page.handleJavaScriptDialog', {
@@ -96,7 +96,7 @@ export async function answerDialog(
   );
   // The closed event also clears it; never drop a newer dialog that the page
   // opened in the meantime.
-  dialogTracker.forgetIf(tabId, dialog ?? dialogTracker.get(tabId));
+  dialogTracker.forgetIf(tabId, dialog);
 }
 
 export async function runCdpInputWithDialogs(
@@ -144,10 +144,9 @@ export async function runCdpInputWithDialogs(
       watcher = dialogTracker.waitForDialog(tabId);
       dialog = await Promise.race([
         watcher.promise,
-        withTimeout(inputDone, INPUT_SETTLE_TIMEOUT_MS, 'Input dispatch').then(
-          () => null,
-          () => null,
-        ),
+        withTimeout(inputDone, INPUT_SETTLE_TIMEOUT_MS, 'Input dispatch')
+          .then(() => sleep(graceMs), () => undefined)
+          .then(() => null),
       ]);
     }
     return answered.length > 1

@@ -3,7 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { answerDialog, isTimeoutError, withTimeout } from '@/utils/cdp-input';
-import { describeDialog, dialogTracker } from '@/utils/dialog-tracker';
+import { describeDialog, dialogTracker, type PendingDialog } from '@/utils/dialog-tracker';
 import { hasDisallowedPublicUrlScheme } from './common';
 
 interface HandleDialogParams {
@@ -68,8 +68,21 @@ class HandleDialogTool extends BaseBrowserToolExecutor {
       dialogTracker.ensureListening();
       const tracked = dialogTracker.get(targetTabId);
 
+      let nextDialog: PendingDialog | null;
       try {
-        await answerDialog(targetTabId, { action, promptText }, tracked);
+        nextDialog = await cdpSessionManager.withSession(targetTabId, 'dialog', async () => {
+          await answerDialog(targetTabId, { action, promptText }, tracked);
+          // Keep the observing session attached between the close and the next opening.
+          const watcher = dialogTracker.waitForDialog(targetTabId);
+          try {
+            return await Promise.race([
+              watcher.promise,
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), FOLLOW_UP_DIALOG_GRACE_MS)),
+            ]);
+          } finally {
+            watcher.cancel();
+          }
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (/no dialog is showing/i.test(message)) {
@@ -85,14 +98,6 @@ class HandleDialogTool extends BaseBrowserToolExecutor {
         }
         throw error;
       }
-
-      // Pages often chain dialogs (confirm, then an alert with the result).
-      const watcher = dialogTracker.waitForDialog(targetTabId);
-      const nextDialog = await Promise.race([
-        watcher.promise,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), FOLLOW_UP_DIALOG_GRACE_MS)),
-      ]);
-      watcher.cancel();
 
       return {
         content: [
