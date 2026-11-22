@@ -1182,6 +1182,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           if (params.text) steps.push({ kind: 'text', text: params.text });
           if (params.submit) steps.push(...parseKeyboardInput('Enter'));
           const frameId = resolveRefTarget(params.ref, params.frameId)?.frameId ?? params.frameId;
+          if (params.background !== true) await this.activateTabIfNeeded(tab);
           return keyboardTool.sendHelperSteps(tab.id!, params.text || '', steps, 0, { frameId, dialog: dialogResponse });
         }
       }

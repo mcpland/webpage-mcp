@@ -81,6 +81,16 @@ describe('computerTool', () => {
       .toEqual(['a', ',', 'b', 'a', ',', 'b']);
   });
 
+  it.each([true, false])('honors background=%s when falling back to DOM typing', async (background) => {
+    const tab = makeTab({ active: false });
+    vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(tab);
+    vi.spyOn(cdpSessionManager, 'attach').mockRejectedValue(new Error('Debugger busy'));
+    const activate = vi.spyOn(computerTool as any, 'activateTabIfNeeded').mockResolvedValue(tab);
+    vi.spyOn(keyboardTool, 'sendHelperSteps').mockResolvedValue({ content: [], isError: false });
+    await computerTool.execute({ tabId: 7, background, action: 'type', text: 'text' });
+    expect(activate).toHaveBeenCalledTimes(background ? 0 : 1);
+  });
+
   it.each(['type', 'key'] as const)(
     'does not %s into the focused element when the ref cannot be focused',
     async (action) => {
