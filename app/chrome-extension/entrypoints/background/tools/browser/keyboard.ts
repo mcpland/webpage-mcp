@@ -78,12 +78,16 @@ export async function dispatchKeySequence(
 export function pressKeysOnFocusedElement(
   tabId: number,
   keys: string,
+  focusTarget: () => Promise<void>,
   dialog?: DialogResponse,
 ): Promise<CdpInputResult> {
   return runCdpInputWithDialogs(
     tabId,
     'keyboard',
-    (signal) => dispatchKeySequence(tabId, keys, 0, signal),
+    async (signal) => {
+      await focusTarget();
+      if (!signal.aborted) await dispatchKeySequence(tabId, keys, 0, signal);
+    },
     { dialog },
   );
 }
@@ -99,7 +103,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
     keys: string,
     steps: KeyboardStep[],
     delay: number,
-    options: { selector?: string; focusedByRef?: boolean; frameId?: number; dialog?: DialogResponse } = {},
+    options: { selector?: string; focusedByRef?: boolean; frameId?: number; submitToken?: string; dialog?: DialogResponse } = {},
   ): Promise<ToolResult> {
     const { selector, focusedByRef, frameId, dialog } = options;
     if (dialog) {
@@ -115,6 +119,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         return this.sendMessageToTab(tabId, {
           action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD, keys, steps,
           selector: focusedByRef ? undefined : selector, delay, deadline,
+          ...(options.submitToken ? { submitToken: options.submitToken } : {}),
         }, frameId);
       };
       const result = await withTimeout(dispatch(), timeoutMs, 'Keyboard helper');

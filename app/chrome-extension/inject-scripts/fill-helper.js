@@ -6,6 +6,25 @@ if (window.__FILL_HELPER_INITIALIZED__) {
 } else {
   window.__FILL_HELPER_INITIALIZED__ = true;
 
+  let pendingSubmit;
+  // Shared only with the keyboard helper in this frame's isolated world.
+  window.__webpageFocusFilledTarget = (token) => {
+    if (!token || pendingSubmit?.token !== token) return false;
+    const element = pendingSubmit.element.deref();
+    if (!element?.isConnected) return false;
+    element.focus({ preventScroll: true });
+    // An inactive tab can receive tab-targeted CDP input. Verify DOM focus through
+    // each shadow host, independently of whether the browser window has OS focus.
+    let current = element;
+    while (current) {
+      const root = current.getRootNode();
+      if (root.activeElement !== current) return false;
+      if (root === document) return true;
+      current = root.host;
+    }
+    return false;
+  };
+
   const MAX_SHADOW_SEARCH_NODES = 2000;
   const MAX_SHADOW_SEARCH_DEPTH = 32;
   const MAX_SHADOW_SEARCH_MS = 100;
@@ -80,7 +99,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
    * @param {boolean} [keepFocus] leave the field focused (no blur) so a
    *   following Enter key press lands in it, as when a user types and submits.
    */
-  async function fillElement(selector, value, ref = null, keepFocus = false) {
+  async function fillElement(selector, value, ref = null, keepFocus = false, submitToken) {
     try {
       // Find the element
       let element = null;
@@ -226,6 +245,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         };
       }
 
+      pendingSubmit = submitToken ? { token: submitToken, element: new WeakRef(element) } : undefined;
       // Focus the element
       element.focus();
 
@@ -434,7 +454,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
   // Listen for messages from the extension
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.action === 'fillElement') {
-      fillElement(request.selector, request.value, request.ref, request.keepFocus === true)
+      fillElement(request.selector, request.value, request.ref, request.keepFocus === true, request.submitToken)
         .then(sendResponse)
         .catch((error) => {
           sendResponse({
@@ -442,6 +462,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
           });
         });
       return true; // Indicates async response
+    } else if (request.action === 'focusFilledTarget') {
+      sendResponse({ success: window.__webpageFocusFilledTarget(request.submitToken) });
+      return false;
     } else if (request.action === 'chrome_fill_or_select_ping') {
       sendResponse({ status: 'pong' });
       return false;

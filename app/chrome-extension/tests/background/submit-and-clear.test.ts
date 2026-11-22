@@ -124,6 +124,7 @@ describe('submit and clear options', () => {
     vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(httpTab);
     const ok = { content: [{ type: 'text', text: '{"success":true}' }], isError: false };
     const fill = vi.spyOn(fillTool, 'execute').mockResolvedValue(ok as any);
+    const focus = vi.spyOn(fillTool as any, 'sendMessageToTab').mockResolvedValue({ success: true });
     const elements = [
       { ref: 'ref_1', value: 'ada' },
       { ref: 'ref_2', value: 'secret' },
@@ -138,6 +139,9 @@ describe('submit and clear options', () => {
     } as any);
     expect(payloadOf(sent)).toMatchObject({ success: true, filled: 2, submitted: true });
     expect(inputLog()).toEqual(['Enter']);
+    const lastToken = fill.mock.calls[1][0].submitToken;
+    expect(lastToken).toEqual(expect.any(String));
+    expect(focus).toHaveBeenCalledWith(7, { action: 'focusFilledTarget', submitToken: lastToken }, undefined);
     expect(fill.mock.calls.map(([args]) => (args as any).keepFocus)).toEqual([false, true]);
 
     mocks.sendCommand.mockClear();

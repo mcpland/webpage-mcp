@@ -478,6 +478,10 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
   // Listener for messages from the extension
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.action === 'simulateKeyboard') {
+      if (request.submitToken && !window.__webpageFocusFilledTarget?.(request.submitToken)) {
+        sendResponse({ success: false, error: 'The filled field could not retain focus for submit' });
+        return false;
+      }
       let targetEl = null;
       if (request.selector) {
         targetEl = document.querySelector(request.selector);

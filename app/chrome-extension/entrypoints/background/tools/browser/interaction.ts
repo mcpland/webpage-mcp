@@ -622,6 +622,7 @@ interface FillToolParams {
   dialog?: unknown; // how to answer a JavaScript dialog the submit opens
   /** Internal: leave the field focused for a following key press (implied by submit). */
   keepFocus?: boolean;
+  submitToken?: string;
 }
 
 /**
@@ -629,6 +630,23 @@ interface FillToolParams {
  */
 class FillTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.FILL;
+
+  async submitFilledElement(tabId: number, frameId: number | undefined, token: string, dialog?: DialogResponse) {
+    const focusTarget = async () => {
+      const result = await this.sendMessageToTab(tabId, { action: 'focusFilledTarget', submitToken: token }, frameId);
+      if (!result?.success) throw new Error('The filled field could not retain focus for submit');
+    };
+    try {
+      return await pressKeysOnFocusedElement(tabId, 'Enter', focusTarget, dialog);
+    } catch (error) {
+      if (!(error instanceof CdpUnavailableError) || dialog) throw error;
+      const fallback = await keyboardTool.sendHelperSteps(tabId, 'Enter', parseKeyboardInput('Enter'), 0, {
+        frameId, submitToken: token,
+      });
+      if (fallback.isError) throw new Error(fallback.content.find((block) => block.type === 'text')?.text || 'submit failed');
+      return undefined;
+    }
+  }
 
   /**
    * Execute fill operation
@@ -734,6 +752,7 @@ class FillTool extends BaseBrowserToolExecutor {
         typeof frameId === 'number' ? [frameId] : undefined,
       );
 
+      const submitToken = args.submit === true ? crypto.randomUUID() : args.submitToken;
       // Send fill message to content script
       const result = await this.sendMessageToTab(
         targetTabId,
@@ -742,6 +761,7 @@ class FillTool extends BaseBrowserToolExecutor {
           selector: finalSelector,
           ref: finalRef,
           value,
+          ...(submitToken ? { submitToken } : {}),
           ...(args.submit === true || args.keepFocus === true ? { keepFocus: true } : {}),
         },
         frameId,
@@ -751,34 +771,12 @@ class FillTool extends BaseBrowserToolExecutor {
         return createErrorResponse(result.error);
       }
 
-      // keepFocus left the field focused, so Enter lands in it.
       let submitInput: CdpInputResult | undefined;
-      if (args.submit === true) {
+      if (args.submit === true && submitToken) {
         try {
-          submitInput = await pressKeysOnFocusedElement(targetTabId, 'Enter', dialogResponse);
+          submitInput = await this.submitFilledElement(targetTabId, frameId, submitToken, dialogResponse);
         } catch (error) {
-          if (error instanceof CdpUnavailableError && !dialogResponse) {
-            const fallback = await keyboardTool.sendHelperSteps(
-              targetTabId,
-              'Enter',
-              parseKeyboardInput('Enter'),
-              0,
-              { frameId },
-            );
-            if (fallback.isError) {
-              const fallbackMessage =
-                fallback.content.find((block) => block.type === 'text')?.text || 'submit failed';
-              return createErrorResponse(
-                `The field was filled, but pressing Enter to submit failed: ${fallbackMessage}`,
-              );
-            }
-          } else {
-            return createErrorResponse(
-              `The field was filled, but pressing Enter to submit failed: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-          }
+          return createErrorResponse(`The field was filled, but pressing Enter to submit failed: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       const pendingDialog =

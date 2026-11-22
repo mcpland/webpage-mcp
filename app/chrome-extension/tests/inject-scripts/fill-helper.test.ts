@@ -126,6 +126,22 @@ describe('fill-helper bounded shadow search', () => {
     expect(document.activeElement).toBe(field);
   });
 
+  it('refocuses the exact filled control if an input handler moved focus before submit', async () => {
+    document.body.innerHTML = '<form><input id="one"></form><form><input id="two"></form>';
+    const field = document.querySelector<HTMLInputElement>('#one')!;
+    const other = document.querySelector<HTMLInputElement>('#two')!;
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => field });
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    field.oninput = () => other.focus();
+    const listener = loadHelper();
+    await dispatch(listener, { action: 'fillElement', selector: '#one', value: 'x', keepFocus: true, submitToken: 'fill-1' });
+    expect(document.activeElement).toBe(other);
+    expect(await dispatch(listener, { action: 'focusFilledTarget', submitToken: 'fill-1' })).toEqual({ success: true });
+    expect(document.activeElement).toBe(field);
+    field.replaceWith(field.cloneNode(true));
+    expect(await dispatch(listener, { action: 'focusFilledTarget', submitToken: 'fill-1' })).toEqual({ success: false });
+  });
+
   it('does not search beyond the bounded BFS frontier', async () => {
     const { root } = createHost();
     const fragment = document.createDocumentFragment();

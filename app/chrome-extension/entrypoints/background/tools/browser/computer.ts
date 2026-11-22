@@ -4,7 +4,7 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { ERROR_MESSAGES, TIMEOUTS } from '@/common/constants';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { clickTool, fillTool } from './interaction';
-import { dispatchKeySequence, keyboardTool, pressKeysOnFocusedElement } from './keyboard';
+import { dispatchKeySequence, keyboardTool } from './keyboard';
 
 /** Select everything in the focused field, then delete it (Ctrl+A is Select All on macOS too). */
 const CLEAR_FIELD_KEYS = 'Ctrl+a Backspace';
@@ -1213,6 +1213,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           ok: boolean;
           error?: string;
         }> = [];
+        const submitToken = params.submit === true ? crypto.randomUUID() : undefined;
         for (const [index, item] of elements.entries()) {
           const target = item?.ref
             ? { ref: String(item.ref) }
@@ -1233,6 +1234,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               windowId: tab.windowId,
               background: params.background === true,
               // The submit Enter below lands in the last field.
+              submitToken: index === elements.length - 1 ? submitToken : undefined,
               keepFocus: params.submit === true && index === elements.length - 1,
             } as any);
             const ok = !r.isError;
@@ -1254,7 +1256,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
         // only when every field was filled: a half-filled form stays unsent.
         let submitInput: CdpInputResult | undefined;
         let submitError: string | undefined;
-        if (params.submit === true) {
+        if (submitToken) {
           if (successCount !== results.length) {
             submitError = 'not submitted because some fields could not be filled';
           } else {
@@ -1268,22 +1270,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
               }
             }
             try {
-              submitInput = await pressKeysOnFocusedElement(tab.id!, 'Enter', dialogResponse);
-            } catch (e) {
-              if (e instanceof CdpUnavailableError && !dialogResponse) {
-                const fallback = await keyboardTool.sendHelperSteps(
-                  tab.id!,
-                  'Enter',
-                  parseKeyboardInput('Enter'),
-                  0,
-                  { frameId: lastFrameId },
-                );
-                if (fallback.isError) {
-                  submitError = `pressing Enter to submit failed: ${firstResultText(fallback) || 'submit failed'}`;
-                }
-              } else {
-                submitError = `pressing Enter to submit failed: ${e instanceof Error ? e.message : String(e)}`;
-              }
+              submitInput = await fillTool.submitFilledElement(tab.id!, lastFrameId, submitToken, dialogResponse);
+            } catch (error) {
+              submitError = `pressing Enter to submit failed: ${error instanceof Error ? error.message : String(error)}`;
             }
           }
         }
