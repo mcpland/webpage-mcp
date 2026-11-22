@@ -240,7 +240,11 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       } catch (error: any) {
         // Chrome may have enabled the domain before the cancelled reply arrived.
         if (options.signal?.aborted) {
-          await cdpSessionManager.sendCommand(tabId, 'Network.disable').catch(() => {});
+          // A native dialog can suspend both enable and disable. Queue the disable
+          // behind enable, then release our lease even if Chrome withholds its reply.
+          await cdpSessionManager.sendCommand(
+            tabId, 'Network.disable', undefined, AbortSignal.timeout(1_000),
+          ).catch(() => {});
         }
         await cdpSessionManager
           .detach(tabId, 'network-capture')

@@ -244,9 +244,32 @@ describe('network capture backend boundaries', () => {
     await Promise.all([child, stopped]);
     expect(backend.hasAvailableCapture()).toBe(false);
     if (mode === 'debugger') {
-      expect(cdp.sendCommand).toHaveBeenCalledWith(8, 'Network.disable');
+      expect(cdp.sendCommand).toHaveBeenCalledWith(8, 'Network.disable', undefined, expect.any(AbortSignal));
       expect(cdp.detach).toHaveBeenCalledWith(8, 'network-capture');
     }
+  });
+
+  it('releases the child debugger lease when a dialog stalls enable and disable', async () => {
+    const { networkDebuggerStartTool: backend } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-debugger'
+    );
+    await (backend as any).startCaptureForTab(7, {
+      maxCaptureTime: 30_000, inactivityTimeout: 10_000, includeStatic: true,
+    });
+    let enabling!: () => void;
+    const started = new Promise<void>((resolve) => { enabling = resolve; });
+    cdp.sendCommand.mockImplementation(async (id, method, _params, signal) => {
+      if (id !== 8) return {};
+      if (method === 'Network.enable') enabling();
+      return new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)));
+    });
+    const child = (backend as any).handleTabCreated({ id: 8, openerTabId: 7 });
+    await started;
+    const result = await backend.stopCapture(7);
+    await child;
+    expect(result.success).toBe(true);
+    expect(cdp.detach).toHaveBeenCalledWith(8, 'network-capture');
+    expect(backend.hasAvailableCapture()).toBe(false);
   });
 
   it.each([
