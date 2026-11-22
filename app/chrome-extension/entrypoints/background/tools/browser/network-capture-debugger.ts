@@ -59,6 +59,17 @@ interface NetworkRequestInfo {
 }
 
 const DEBUGGER_PROTOCOL_VERSION = '1.3';
+
+async function prepareBlankCaptureTab(tabId: number): Promise<void> {
+  // tabs.update can return the previous committed URL while about:blank is pending.
+  await chrome.tabs.update(tabId, { url: 'about:blank' });
+  const deadline = Date.now() + 5000;
+  while ((await chrome.tabs.get(tabId)).url !== 'about:blank') {
+    if (Date.now() >= deadline) throw new Error('Timed out preparing the tab for network capture');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 /**
  * Network capture start tool - uses Chrome Debugger API to start capturing network requests
  */
@@ -1065,12 +1076,12 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       // loading it first lost its earliest requests, often the ones that matter.
       let loadAfterStart: string | undefined;
       if (targetUrl) {
-        if (explicitTab?.id && canAttachBeforeNavigation(explicitTab.url)) {
+        if (explicitTab?.id) {
+          if (!canAttachBeforeNavigation(explicitTab.url)) {
+            await prepareBlankCaptureTab(explicitTab.id);
+          }
           tabToOperateOn = explicitTab;
           loadAfterStart = targetUrl;
-        } else if (explicitTab?.id) {
-          // Pages such as chrome://newtab refuse the debugger, so load the URL first.
-          tabToOperateOn = await chrome.tabs.update(explicitTab.id, { url: targetUrl });
         } else {
           const existingTabs = await chrome.tabs.query({
             url: targetUrl.startsWith('http') ? targetUrl : `*://*/*${targetUrl}*`,

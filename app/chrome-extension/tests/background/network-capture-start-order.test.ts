@@ -95,15 +95,54 @@ describe('network capture start with a url', () => {
     await networkDebuggerStartTool.stopCapture(9);
   });
 
-  it('debugger: loads the url first when the explicit tab cannot take a debugger yet', async () => {
+  it('debugger: waits for a committed blank page and enables capture before the target request', async () => {
     tabUrl = 'chrome://newtab/';
     const { networkDebuggerStartTool } = await import(
       '@/entrypoints/background/tools/browser/network-capture-debugger'
     );
 
-    await networkDebuggerStartTool.execute({ url: TARGET, tabId: 9, background: true });
+    let blankPending = false;
+    vi.mocked(chrome.tabs.update).mockImplementation(async (_id, props) => {
+      order.push('load:' + props.url);
+      if (props.url === 'about:blank') blankPending = true;
+      else if (props.url) tabUrl = props.url;
+      return { id: 9, windowId: 1, url: tabUrl } as chrome.tabs.Tab;
+    });
+    vi.mocked(chrome.tabs.get).mockImplementation(async () => {
+      const url = tabUrl;
+      if (blankPending) {
+        blankPending = false;
+        tabUrl = 'about:blank';
+      }
+      return { id: 9, windowId: 1, url } as chrome.tabs.Tab;
+    });
+    cdp.attach.mockImplementation(async () => {
+      order.push('attach:' + tabUrl);
+    });
 
-    expect(order.slice(0, 2)).toEqual([`load:${TARGET}`, 'attach']);
-    await networkDebuggerStartTool.stopCapture(9);
+    const result = await networkDebuggerStartTool.execute({ url: TARGET, tabId: 9, background: true });
+    expect(result.isError).toBe(false);
+    expect(order).toEqual(['load:about:blank', 'attach:about:blank', 'listening', 'load:' + TARGET]);
+    const stopped = await networkDebuggerStartTool.stopCapture(9);
+    expect(stopped.data?.tabUrl).toBe(TARGET);
   });
+  it('debugger: fails without capturing if the blank navigation never commits', async () => {
+    tabUrl = 'chrome://newtab/';
+    vi.mocked(chrome.tabs.update).mockImplementation(async () => ({ id: 9, url: tabUrl }) as chrome.tabs.Tab);
+    const { networkDebuggerStartTool } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-debugger'
+    );
+    vi.useFakeTimers();
+    try {
+      const pending = networkDebuggerStartTool.execute({ url: TARGET, tabId: 9, background: true });
+      await vi.advanceTimersByTimeAsync(5500);
+      const result = await pending;
+      expect(result.isError).toBe(true);
+      expect(cdp.attach).not.toHaveBeenCalled();
+      expect(chrome.tabs.update).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 });
