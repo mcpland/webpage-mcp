@@ -1,3 +1,4 @@
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
@@ -17,6 +18,16 @@ const NAVIGATION_START_GRACE_MS = 1000;
 
 type NavigateOpenMode = 'current_tab' | 'new_tab' | 'new_window';
 type NavigationWaitUntil = 'load' | 'commit';
+
+interface TabHistory {
+  currentIndex: number;
+  entries: Array<{ id: number }>;
+}
+
+function readTabHistory(tabId: number): Promise<TabHistory | undefined> {
+  return cdpSessionManager.sendCommand<TabHistory>(tabId, 'Page.getNavigationHistory')
+    .catch(() => undefined);
+}
 
 interface NavigateToolParams {
   url?: string;
@@ -217,11 +228,23 @@ class NavigateTool extends BaseBrowserToolExecutor {
   ): Promise<chrome.tabs.Tab> {
     // Entries may share a URL, including pushState and full-document navigations.
     // Arm before calling goBack/goForward so a cached or same-document commit is observable.
-    let committedUrl: string | undefined;
-    const onCommit = (details: { tabId: number; frameId: number; url: string }) => {
-      if (details.tabId === tabId && details.frameId === 0) committedUrl = details.url;
-    };
     const navigation = chrome.webNavigation;
+    const frames = await navigation?.getAllFrames?.({ tabId })?.catch(() => null);
+    const before = frames?.some((frame) => frame.frameId !== 0) ? await readTabHistory(tabId) : undefined;
+    const destinations = before && new Set((direction === 'back'
+      ? before.entries.slice(0, before.currentIndex)
+      : before.entries.slice(before.currentIndex + 1)).map((entry) => entry.id));
+    let committedUrl: string | undefined;
+    let childUpdated = false;
+    let childTraversed = false;
+    const onCommit = (details: chrome.webNavigation.WebNavigationTransitionCallbackDetails) => {
+      if (details.tabId !== tabId) return;
+      if (details.frameId === 0) committedUrl = details.url;
+      else {
+        childUpdated = true;
+        if (details.transitionQualifiers?.includes('forward_back')) childTraversed = true;
+      }
+    };
     const events = [navigation?.onCommitted, navigation?.onHistoryStateUpdated, navigation?.onReferenceFragmentUpdated];
     for (const event of events) event?.addListener(onCommit);
     try {
@@ -231,7 +254,15 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
       for (;;) {
         const current = await chrome.tabs.get(tabId);
-        if (current.url && (current.url !== previousUrl || current.url === committedUrl)) {
+        // Chrome can report a child traversing pushState entries without a forward_back
+        // qualifier. Confirm it reached an existing joint session-history entry.
+        if (childUpdated && destinations?.size && !childTraversed) {
+          childUpdated = false;
+          const history = await readTabHistory(tabId);
+          const entry = history?.entries[history.currentIndex];
+          childTraversed = entry !== undefined && destinations.has(entry.id);
+        }
+        if (current.url && (current.url !== previousUrl || current.url === committedUrl || childTraversed)) {
           if (waitUntil === 'commit' || current.status === 'complete') return current;
           return this.waitForLoadComplete(tabId, deadline);
         }

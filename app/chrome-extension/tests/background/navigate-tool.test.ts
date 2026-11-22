@@ -21,6 +21,7 @@ vi.mock('@/entrypoints/background/tools/browser/gif-recorder', () => ({
   isAutoCaptureActive: mocks.isAutoCaptureActive,
 }));
 
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { navigateTool } from '@/entrypoints/background/tools/browser/common';
 import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
 
@@ -1024,6 +1025,40 @@ describe('navigateTool', () => {
       await vi.advanceTimersByTimeAsync(8500);
       expect((await pending).isError).toBe(true);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['back', 'forward'] as const)('recognizes %s through a child frame only after the joint history entry changes', async (direction) => {
+    vi.useFakeTimers();
+    const event = { addListener: vi.fn(), removeListener: vi.fn() };
+    const tab = makeTab();
+    Object.assign(chrome, { webNavigation: {
+      onHistoryStateUpdated: event,
+      getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0 }, { frameId: 9 }]),
+    } });
+    const startIndex = direction === 'back' ? 1 : 0;
+    let currentIndex = startIndex;
+    const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockImplementation(async () => ({
+      currentIndex, entries: [{ id: 16, url: tab.url }, { id: 24, url: tab.url }],
+    }));
+    const issueCommand = direction === 'back' ? mocks.tabsGoBack : mocks.tabsGoForward;
+    const notify = () => event.addListener.mock.calls[0][0]({ tabId: tab.id, frameId: 9, url: 'https://frame.test/' });
+    issueCommand.mockImplementation(async () => {
+      notify(); // An unrelated iframe update must not end the wait.
+      setTimeout(() => { currentIndex = 1 - startIndex; notify(); }, 300);
+    });
+    try {
+      const pending = navigateTool.execute({ url: direction, waitUntil: 'commit' }).then((result) => {
+        expect(currentIndex).not.toBe(startIndex);
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(8500);
+      expect((await pending).isError).toBe(false);
+      expect(history).toHaveBeenCalledWith(tab.id, 'Page.getNavigationHistory');
+      expect(event.removeListener).toHaveBeenCalledWith(event.addListener.mock.calls[0][0]);
+    } finally {
+      history.mockRestore();
       vi.useRealTimers();
     }
   });
