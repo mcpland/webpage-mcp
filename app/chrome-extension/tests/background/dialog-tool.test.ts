@@ -137,5 +137,39 @@ describe('handleDialogTool', () => {
 
     expect(result.isError).toBe(true);
     expect(textOf(result)).toBe('No JavaScript dialog is open on this tab.');
+    // The responsiveness probe reuses the same session instead of attaching twice.
+    expect(mocks.attach).toHaveBeenCalledTimes(1);
+    expect(mocks.detach).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears a stale tracked dialog when Chrome reports no dialog is showing', async () => {
+    vi.resetModules();
+    let eventListener: ((source: any, method: string, params?: any) => void) | undefined;
+    (chrome.debugger.onEvent.addListener as ReturnType<typeof vi.fn>).mockImplementation(
+      (listener: any) => {
+        eventListener = listener;
+      },
+    );
+    const { handleDialogTool: freshTool } = await import(
+      '@/entrypoints/background/tools/browser/dialog'
+    );
+    const { dialogTracker: freshTracker } = await import('@/utils/dialog-tracker');
+    freshTracker.ensureListening();
+    eventListener?.({ tabId: 7 }, 'Page.javascriptDialogOpening', {
+      type: 'alert',
+      message: 'Stale dialog',
+    });
+    expect(freshTracker.get(7)).toBeDefined();
+
+    mocks.sendCommand.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Page.handleJavaScriptDialog') throw new Error('No dialog is showing');
+      return { result: { value: 1 } };
+    });
+
+    const result = await freshTool.execute({ tabId: 7, action: 'accept' });
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toBe('No JavaScript dialog is open on this tab.');
+    expect(freshTracker.get(7)).toBeUndefined();
   });
 });

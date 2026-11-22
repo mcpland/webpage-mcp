@@ -16,6 +16,7 @@ vi.mock('@/utils/cdp-session-manager', () => ({
 }));
 
 import {
+  CdpUnavailableError,
   PageUnresponsiveError,
   runCdpInputWithDialogs,
 } from '@/utils/cdp-input';
@@ -109,6 +110,80 @@ describe('runCdpInputWithDialogs', () => {
     await assertion;
     expect(dispatch).not.toHaveBeenCalled();
     expect(mocks.detach).toHaveBeenCalledWith(7, 'click');
+  });
+
+  it('fails fast with PageUnresponsiveError when a dialog is already tracked on the tab', async () => {
+    emit('Page.javascriptDialogOpening', { type: 'alert', message: 'Still open' });
+    const dispatch = vi.fn();
+
+    await expect(runCdpInputWithDialogs(7, 'click', dispatch)).rejects.toBeInstanceOf(
+      PageUnresponsiveError,
+    );
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(mocks.sendCommand).not.toHaveBeenCalled();
+  });
+
+  it('throws CdpUnavailableError when pre-dispatch attach or Page.enable fails', async () => {
+    mocks.attach.mockRejectedValueOnce(new Error('Debugger busy'));
+    await expect(
+      runCdpInputWithDialogs(7, 'click', vi.fn()),
+    ).rejects.toBeInstanceOf(CdpUnavailableError);
+
+    mocks.sendCommand.mockRejectedValueOnce(new Error('Target closed'));
+    await expect(
+      runCdpInputWithDialogs(7, 'click', vi.fn()),
+    ).rejects.toBeInstanceOf(CdpUnavailableError);
+  });
+
+  it('aborts the dispatch signal when a dialog opens mid-sequence', async () => {
+    let signalAborted = false;
+    const dispatch = vi.fn(async (signal: AbortSignal) => {
+      emit('Page.javascriptDialogOpening', { type: 'confirm', message: 'Mid-way?' });
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => {
+          signalAborted = true;
+          resolve();
+        });
+      });
+    });
+
+    const result = await runCdpInputWithDialogs(7, 'click', dispatch);
+
+    expect(result.dialog).toEqual({ type: 'confirm', message: 'Mid-way?', handled: false });
+    expect(signalAborted).toBe(true);
+  });
+
+  it('surfaces a remaining open dialog after MAX_CHAINED_DIALOGS auto-responses', async () => {
+    let count = 0;
+    const openNext = () => {
+      count += 1;
+      emit('Page.javascriptDialogOpening', { type: 'alert', message: `dialog ${count}` });
+    };
+    mocks.sendCommand.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Page.handleJavaScriptDialog') {
+        emit('Page.javascriptDialogClosed', { result: true });
+        if (count < 4) openNext();
+      }
+      return {};
+    });
+
+    const result = await runCdpInputWithDialogs(
+      7,
+      'click',
+      async () => {
+        openNext();
+      },
+      { dialog: { action: 'accept' } },
+    );
+
+    expect(result.dialog).toEqual({ type: 'alert', message: 'dialog 4', handled: false });
+    expect(result.dialogs).toHaveLength(4);
+    expect(result.dialogs?.map((d) => `${d.message}:${d.handled}`)).toEqual([
+      'dialog 1:accept',
+      'dialog 2:accept',
+      'dialog 3:accept',
+      'dialog 4:false',
+    ]);
   });
 });
 

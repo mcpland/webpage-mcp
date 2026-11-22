@@ -11,6 +11,7 @@ const QUOTA_ERROR_PATTERN = /MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/i;
 const DEFAULT_CALLS_PER_SECOND = 2;
 const SAFETY_MARGIN_MS = 50;
 const MAX_QUOTA_RETRIES = 2;
+export const DEFAULT_CAPTURE_VISIBLE_TAB_TIMEOUT_MS = 15_000;
 
 let lastCaptureStartedAt = Number.NEGATIVE_INFINITY;
 let queue: Promise<unknown> = Promise.resolve();
@@ -32,6 +33,21 @@ function isQuotaError(error: unknown): boolean {
   return QUOTA_ERROR_PATTERN.test(message);
 }
 
+function withCaptureTimeout(promise: Promise<string>, timeoutMs: number): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`captureVisibleTab timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+    }),
+  ]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 /**
  * captureVisibleTab with extension-wide pacing. Pass `windowId` to capture a
  * specific window, or undefined for the current window.
@@ -39,6 +55,7 @@ function isQuotaError(error: unknown): boolean {
 export function captureVisibleTabPaced(
   windowId: number | undefined,
   options: chrome.tabs.CaptureVisibleTabOptions,
+  timeoutMs = DEFAULT_CAPTURE_VISIBLE_TAB_TIMEOUT_MS,
 ): Promise<string> {
   const run = async (): Promise<string> => {
     const interval = minimumIntervalMs();
@@ -47,9 +64,11 @@ export function captureVisibleTabPaced(
       if (wait > 0) await sleep(wait);
       lastCaptureStartedAt = Date.now();
       try {
-        return typeof windowId === 'number'
-          ? await chrome.tabs.captureVisibleTab(windowId, options)
-          : await chrome.tabs.captureVisibleTab(options);
+        const capture =
+          typeof windowId === 'number'
+            ? chrome.tabs.captureVisibleTab(windowId, options)
+            : chrome.tabs.captureVisibleTab(options);
+        return await withCaptureTimeout(capture, timeoutMs);
       } catch (error) {
         if (attempt >= MAX_QUOTA_RETRIES || !isQuotaError(error)) throw error;
       }

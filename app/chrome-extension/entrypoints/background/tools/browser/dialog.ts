@@ -76,37 +76,53 @@ class HandleDialogTool extends BaseBrowserToolExecutor {
       dialogTracker.ensureListening();
       const tracked = dialogTracker.get(targetTabId);
 
-      let nextDialog: PendingDialog | null;
+      let outcome:
+        | { kind: 'ok'; nextDialog: PendingDialog | null }
+        | { kind: 'error'; message: string };
       try {
-        nextDialog = await withDialogSession(targetTabId, async () => {
-          await answerDialog(targetTabId, { action, promptText }, tracked);
+        outcome = await withDialogSession(targetTabId, async () => {
+          try {
+            await answerDialog(targetTabId, { action, promptText }, tracked);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (/no dialog is showing/i.test(message)) {
+              // Drop any stale tracked dialog so its lease does not leak or poison later waits.
+              dialogTracker.forgetIf(targetTabId, tracked);
+              if (!(await isPageResponsive(targetTabId))) {
+                return { kind: 'error' as const, message: UNTRACKED_DIALOG_MESSAGE };
+              }
+              return {
+                kind: 'error' as const,
+                message: 'No JavaScript dialog is open on this tab.',
+              };
+            }
+            throw error;
+          }
           // Keep the observing session attached between the close and the next opening.
           const watcher = dialogTracker.waitForDialog(targetTabId);
           try {
-            return await waitForFollowUpDialog(
+            const nextDialog = await waitForFollowUpDialog(
               targetTabId,
               watcher.promise,
               FOLLOW_UP_DIALOG_GRACE_MS,
             );
+            return { kind: 'ok' as const, nextDialog };
           } finally {
             watcher.cancel();
           }
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (/no dialog is showing/i.test(message)) {
-          if (!(await isPageResponsive(targetTabId))) {
-            return createErrorResponse(UNTRACKED_DIALOG_MESSAGE);
-          }
-          return createErrorResponse('No JavaScript dialog is open on this tab.');
-        }
         if (isTimeoutError(error)) {
-          return createErrorResponse(
-            `${message}. ${UNTRACKED_DIALOG_MESSAGE}`,
-          );
+          return createErrorResponse(`${message}. ${UNTRACKED_DIALOG_MESSAGE}`);
         }
         throw error;
       }
+
+      if (outcome.kind === 'error') {
+        return createErrorResponse(outcome.message);
+      }
+      const nextDialog = outcome.nextDialog;
 
       return {
         content: [

@@ -156,3 +156,50 @@ it('stops waiting for an unreported follow-up dialog after a bounded time', asyn
   expect(result.dialogs).toBeUndefined();
   expect(state.attached).toBe(false);
 });
+
+it('keeps dialog tracking intact when a stale local onDetach arrives during a new session', async () => {
+  vi.resetModules();
+  let attached = false;
+  type EventListener = (source: { tabId: number }, method: string, params: object) => void;
+  type DetachListener = (source: { tabId: number }, reason: string) => void;
+  const eventListeners: EventListener[] = [];
+  const detachListeners: DetachListener[] = [];
+  vi.stubGlobal('chrome', {
+    ...chrome,
+    runtime: { ...chrome.runtime, id: 'ext-id' },
+    tabs: { ...chrome.tabs, get: async () => ({ id: 7, windowId: 2, url: 'https://example.test/' }) },
+    debugger: {
+      getTargets: async () => (attached ? [{ tabId: 7, attached: true, extensionId: 'ext-id' }] : []),
+      attach: async () => { attached = true; },
+      detach: async () => { attached = false; },
+      onEvent: { addListener: (l: EventListener) => eventListeners.push(l) },
+      onDetach: {
+        addListener: (l: DetachListener) => detachListeners.push(l),
+        removeListener: vi.fn(),
+      },
+      sendCommand: async () => ({}),
+    },
+  });
+
+  const { cdpSessionManager } = await import('@/utils/cdp-session-manager');
+  const { dialogTracker } = await import('@/utils/dialog-tracker');
+  dialogTracker.ensureListening();
+
+  // First session attaches and detaches locally; Chrome will deliver its onDetach late.
+  await cdpSessionManager.attach(7, 'first');
+  await cdpSessionManager.detach(7, 'first');
+
+  // Second session attaches and observes a dialog.
+  await cdpSessionManager.attach(7, 'second');
+  eventListeners.forEach((l) =>
+    l({ tabId: 7 }, 'Page.javascriptDialogOpening', { type: 'confirm', message: 'Still here?' }),
+  );
+  expect(dialogTracker.get(7)?.message).toBe('Still here?');
+
+  // Stale local detach notification arrives late: must NOT clear the active dialog.
+  detachListeners.forEach((l) => l({ tabId: 7 }, 'canceled_by_user'));
+  expect(dialogTracker.get(7)?.message).toBe('Still here?');
+
+  await cdpSessionManager.detach(7, 'second');
+  dialogTracker.forget(7);
+});

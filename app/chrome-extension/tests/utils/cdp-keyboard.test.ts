@@ -66,6 +66,25 @@ describe('dispatchKeyStroke', () => {
     const [down] = await eventsFor('a');
     expect(down).toMatchObject({ type: 'keyDown', key: 'a', code: 'KeyA', text: 'a' });
   });
+
+  it('normalizes uppercase letters in command chords when Shift is not held', async () => {
+    const cmdK = await eventsFor('Cmd+K', true);
+    expect(cmdK[1]).toMatchObject({ type: 'rawKeyDown', key: 'k', code: 'KeyK', modifiers: 4 });
+    const cmdShiftK = await eventsFor('Cmd+Shift+K', true);
+    expect(cmdShiftK[2]).toMatchObject({ type: 'rawKeyDown', key: 'K', code: 'KeyK', modifiers: 12 });
+  });
+
+  it('supports standalone modifier aliases, includes modifier bit on down, and deduplicates repeats', async () => {
+    const superEvents = await eventsFor('Super');
+    expect(superEvents[0]).toMatchObject({ type: 'rawKeyDown', key: 'Meta', modifiers: 4 });
+    expect(superEvents[1]).toMatchObject({ type: 'keyUp', key: 'Meta', modifiers: 0 });
+    expect((await eventsFor('Opt'))[0]).toMatchObject({ key: 'Alt', modifiers: 1 });
+    expect((await eventsFor('Win'))[0]).toMatchObject({ key: 'Meta', modifiers: 4 });
+    expect((await eventsFor('Ctrl+Ctrl')).map((e) => [e.type, e.key, e.modifiers])).toEqual([
+      ['rawKeyDown', 'Control', 2],
+      ['keyUp', 'Control', 0],
+    ]);
+  });
 });
 
 describe('parseKeyboardInput', () => {
@@ -88,6 +107,8 @@ describe('parseKeyboardInput', () => {
     expect(kinds('Hello, World')).toEqual(['text:Hello, World']);
     expect(kinds('a b')).toEqual(['text:a b']);
     expect(kinds(' ')).toEqual(['text: ']);
+    expect(kinds(' a ')).toEqual(['text: a ']);
+    expect(kinds('a,,b')).toEqual(['text:a,,b']);
   });
 });
 

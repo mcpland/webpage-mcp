@@ -1,14 +1,20 @@
 import type { ToolResult } from '@/common/tool-handler';
 
 export function readScreenshotData(result: ToolResult): { data: string } | { error: string } {
-  const text = result.content.find((block) => block.type === 'text')?.text;
-  if (result.isError) return { error: text || 'screenshot failed' };
+  const content = Array.isArray(result?.content) ? result.content : [];
+  const rawText = content.find(
+    (block): block is { type: 'text'; text: string } =>
+      block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0,
+  )?.text;
+  if (result?.isError) return { error: rawText?.trim() || 'screenshot failed' };
 
-  const image = result.content.find((block) => block.type === 'image');
-  if (image?.data) return { data: image.data };
-  if (!text) return { error: 'screenshot tool returned an empty response' };
+  const image = content.find((block) => block?.type === 'image');
+  if (image && 'data' in image && typeof image.data === 'string' && image.data.length > 0) {
+    return { data: image.data };
+  }
+  if (!rawText) return { error: 'screenshot tool returned an empty response' };
   try {
-    const data = JSON.parse(text)?.base64Data;
+    const data = JSON.parse(rawText)?.base64Data;
     if (typeof data === 'string' && data.length > 0) return { data };
   } catch {
     return { error: 'screenshot tool returned invalid JSON' };

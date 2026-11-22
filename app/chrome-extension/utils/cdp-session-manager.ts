@@ -27,6 +27,7 @@ export class CDPSessionManager {
   private readonly operationTails = new Map<number, Promise<void>>();
   private readonly detachGenerations = new Map<number, number>();
   private readonly pendingLocalDetachEvents = new Map<number, number>();
+  private readonly externalDetachListeners = new Set<(tabId: number, reason: string) => void>();
   private readonly listenerApi?: DebuggerApi;
 
   constructor(private readonly configuredDebuggerApi?: DebuggerApi) {
@@ -38,8 +39,16 @@ export class CDPSessionManager {
     this.listenerApi?.onDetach?.addListener(this.handleDebuggerDetach);
   }
 
+  onExternalDetach(listener: (tabId: number, reason: string) => void): () => void {
+    this.externalDetachListeners.add(listener);
+    return () => {
+      this.externalDetachListeners.delete(listener);
+    };
+  }
+
   dispose(): void {
     this.listenerApi?.onDetach?.removeListener(this.handleDebuggerDetach);
+    this.externalDetachListeners.clear();
     this.sessions.clear();
     this.detachGenerations.clear();
     this.pendingLocalDetachEvents.clear();
@@ -125,6 +134,14 @@ export class CDPSessionManager {
     } else {
       this.detachGenerations.delete(tabId);
     }
+
+    for (const listener of this.externalDetachListeners) {
+      try {
+        listener(tabId, reason);
+      } catch {
+        // Isolate external detach listener failures.
+      }
+    }
   };
 
   private runSerialized<T>(
@@ -147,6 +164,21 @@ export class CDPSessionManager {
       if (!this.sessions.has(tabId)) {
         this.detachGenerations.delete(tabId);
       }
+    });
+  }
+
+  /**
+   * Acquire an owner lease only if this manager already owns an active
+   * attachment for `tabId`. Never initiates a new `chrome.debugger.attach()`.
+   */
+  async attachIfExisting(tabId: number, owner: OwnerTag): Promise<boolean> {
+    return this.runSerialized(tabId, async () => {
+      const current = this.getState(tabId);
+      if (!current?.attachedByUs) {
+        return false;
+      }
+      this.incrementOwner(current, owner);
+      return true;
     });
   }
 

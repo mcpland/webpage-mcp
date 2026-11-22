@@ -54,4 +54,15 @@ describe('captureVisibleTabPaced', () => {
     await assertion;
     expect(captureVisibleTab).toHaveBeenCalledTimes(1);
   });
+
+  it('times out a hung capture so subsequent captures are not deadlocked', async () => {
+    captureVisibleTab.mockImplementationOnce(() => new Promise(() => {}));
+    const first = captureVisibleTabPaced(3, { format: 'png' }, 100);
+    const second = captureVisibleTabPaced(3, { format: 'png' }, 100);
+    const firstRejection = expect(first).rejects.toThrow('timed out after 100ms');
+    await vi.runAllTimersAsync();
+    await firstRejection;
+    await expect(second).resolves.toBe('data:image/png;base64,AA==');
+    expect(captureVisibleTab).toHaveBeenCalledTimes(2);
+  });
 });

@@ -74,7 +74,14 @@ class DialogTracker {
     const debuggerApi = typeof chrome !== 'undefined' ? chrome.debugger : undefined;
     if (!debuggerApi?.onEvent?.addListener) return;
     debuggerApi.onEvent.addListener(this.handleEvent);
-    debuggerApi.onDetach?.addListener?.(this.handleDetach);
+    // Prefer CDPSessionManager's filtered detach notifications so delayed
+    // local canceled_by_user events from a prior detach never tear down a
+    // newer live dialog session.
+    if (typeof cdpSessionManager.onExternalDetach === 'function') {
+      cdpSessionManager.onExternalDetach((tabId) => this.forget(tabId));
+    } else {
+      debuggerApi.onDetach?.addListener?.(this.handleDetach);
+    }
     chrome.tabs?.onRemoved?.addListener?.(this.handleTabRemoved);
     this.listening = true;
   }
@@ -148,13 +155,16 @@ class DialogTracker {
       };
       this.pending.set(tabId, dialog);
       if (!this.leases.has(tabId)) {
-        this.leases.set(
-          tabId,
-          cdpSessionManager.attach(tabId, LEASE_OWNER).then(
-            () => true,
-            () => false,
-          ),
-        );
+        // Only hold a lease on the already-attached observing session; never
+        // initiate a fresh debugger attach after an external detach.
+        const lease =
+          typeof cdpSessionManager.attachIfExisting === 'function'
+            ? cdpSessionManager.attachIfExisting(tabId, LEASE_OWNER).catch(() => false)
+            : cdpSessionManager.attach(tabId, LEASE_OWNER).then(
+                () => true,
+                () => false,
+              );
+        this.leases.set(tabId, lease);
       }
       const set = this.waiters.get(tabId);
       if (set) {

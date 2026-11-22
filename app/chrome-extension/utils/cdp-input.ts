@@ -39,6 +39,17 @@ export class PageUnresponsiveError extends Error {
   }
 }
 
+/**
+ * Thrown when the debugger could not be attached or initialized before any
+ * input was dispatched, so callers may safely fall back to DOM helpers.
+ */
+export class CdpUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'CdpUnavailableError';
+  }
+}
+
 class InputTimeoutError extends Error {
   constructor(label: string, timeoutMs: number) {
     super(`${label} timed out after ${timeoutMs}ms`);
@@ -58,23 +69,47 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: st
   });
 }
 
-// Chrome cannot cancel an individual command. Stop awaiting its reply in the
-// session manager as well, so its lease is released even if the renderer stays blocked.
+// Chrome cannot cancel an individual command. Abort the command signal so the
+// session manager releases its lease before rejecting, while bounding the wait
+// even if an underlying mock ignores AbortSignal.
 export async function sendTimedDialogCommand(
   tabId: number,
   method: string,
   params: object | undefined,
   timeoutMs: number,
   label: string,
+  externalSignal?: AbortSignal,
 ): Promise<void> {
   const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+  let onExternalAbort: (() => void) | undefined;
+
+  const sendPromise = cdpSessionManager.sendCommand(tabId, method, params, controller.signal);
+  const abortFallback = new Promise<never>((_, reject) => {
+    const triggerAbort = (reason: unknown) => {
+      controller.abort(reason);
+      // Let sendCommand's finally { await detach() } run first when it honors signal.
+      fallbackTimer = setTimeout(() => reject(reason), 0);
+    };
+    timer = setTimeout(() => {
+      triggerAbort(new InputTimeoutError(label, timeoutMs));
+    }, timeoutMs);
+    if (externalSignal) {
+      onExternalAbort = () => {
+        triggerAbort(externalSignal.reason ?? new Error('Dialog command aborted'));
+      };
+      if (externalSignal.aborted) onExternalAbort();
+      else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  });
+
   try {
-    await withTimeout(
-      cdpSessionManager.sendCommand(tabId, method, params, controller.signal),
-      timeoutMs,
-      label,
-    );
+    await Promise.race([sendPromise, abortFallback]);
   } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
+    if (onExternalAbort) externalSignal?.removeEventListener('abort', onExternalAbort);
     controller.abort();
   }
 }
@@ -83,7 +118,9 @@ export async function sendTimedDialogCommand(
 export async function isPageResponsive(
   tabId: number,
   timeoutMs = RESPONSIVENESS_PROBE_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<boolean> {
+  if (signal?.aborted) return true;
   try {
     await sendTimedDialogCommand(
       tabId,
@@ -91,11 +128,29 @@ export async function isPageResponsive(
       { expression: '1', returnByValue: true },
       timeoutMs,
       'Page responsiveness probe',
+      signal,
     );
     return true;
   } catch (error) {
+    if (signal?.aborted) return true;
     return !isTimeoutError(error);
   }
+}
+
+function cancellableSleep(ms: number): { promise: Promise<null>; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const promise = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return {
+    promise,
+    cancel: () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
 }
 
 /**
@@ -110,22 +165,33 @@ export async function waitForFollowUpDialog(
   next: Promise<PendingDialog>,
   graceMs: number,
 ): Promise<PendingDialog | null> {
-  const early = await Promise.race([next, sleep(graceMs).then(() => null)]);
-  if (early) return early;
-  return Promise.race([
-    next,
-    isPageResponsive(tabId, FOLLOW_UP_PROBE_TIMEOUT_MS).then((responsive) =>
-      responsive ? null : Promise.race([next, sleep(FOLLOW_UP_EVENT_WAIT_MS).then(() => null)]),
-    ),
-  ]);
+  const earlySleep = cancellableSleep(graceMs);
+  try {
+    const early = await Promise.race([next, earlySleep.promise]);
+    if (early) return early;
+  } finally {
+    earlySleep.cancel();
+  }
+
+  const probeAbort = new AbortController();
+  let eventSleep: { promise: Promise<null>; cancel: () => void } | undefined;
+  try {
+    return await Promise.race([
+      next,
+      isPageResponsive(tabId, FOLLOW_UP_PROBE_TIMEOUT_MS, probeAbort.signal).then((responsive) => {
+        if (responsive || probeAbort.signal.aborted) return null;
+        eventSleep = cancellableSleep(FOLLOW_UP_EVENT_WAIT_MS);
+        return Promise.race([next, eventSleep.promise]);
+      }),
+    ]);
+  } finally {
+    probeAbort.abort();
+    eventSleep?.cancel();
+  }
 }
 
 export function isTimeoutError(error: unknown): boolean {
   return error instanceof Error && error.name === 'InputTimeoutError';
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export interface DialogOutcome {
@@ -171,12 +237,22 @@ export async function answerDialog(
 export async function runCdpInputWithDialogs(
   tabId: number,
   owner: string,
-  dispatch: () => Promise<unknown>,
+  dispatch: (signal: AbortSignal) => Promise<unknown>,
   options: { dialog?: DialogResponse; graceMs?: number } = {},
 ): Promise<CdpInputResult> {
   dialogTracker.ensureListening();
-  await cdpSessionManager.attach(tabId, owner);
+  // Fail fast when a dialog is already tracked on this tab instead of waiting
+  // on Page.enable or accidentally dispatching input behind the open dialog.
+  if (dialogTracker.get(tabId)) {
+    throw new PageUnresponsiveError();
+  }
+  try {
+    await cdpSessionManager.attach(tabId, owner);
+  } catch (error) {
+    throw new CdpUnavailableError(error);
+  }
   let watcher = dialogTracker.waitForDialog(tabId);
+  const dispatchAbort = new AbortController();
   try {
     try {
       await sendTimedDialogCommand(
@@ -188,22 +264,31 @@ export async function runCdpInputWithDialogs(
       );
     } catch (error) {
       if (isTimeoutError(error)) throw new PageUnresponsiveError();
-      throw error;
+      throw new CdpUnavailableError(error);
     }
 
-    const inputDone = Promise.resolve().then(dispatch);
+    const inputDone = Promise.resolve().then(() => dispatch(dispatchAbort.signal));
     // While a dialog is open the dispatch stays pending; never leave it unobserved.
     inputDone.catch(() => {});
 
     const graceMs = options.graceMs ?? DIALOG_GRACE_MS;
     const first = await Promise.race([inputDone.then(() => null), watcher.promise]);
-    let dialog: PendingDialog | null =
-      first ??
-      (graceMs > 0
-        ? await Promise.race([watcher.promise, sleep(graceMs).then(() => null)])
-        : null);
+    let dialog: PendingDialog | null = first;
+    if (!dialog && graceMs > 0) {
+      const graceSleep = cancellableSleep(graceMs);
+      try {
+        dialog = await Promise.race([watcher.promise, graceSleep.promise]);
+      } finally {
+        graceSleep.cancel();
+      }
+    }
     if (!dialog) return {};
-    if (!options.dialog) return { dialog: outcome(dialog, false) };
+    if (!options.dialog) {
+      // Stop any remaining steps of a multi-step dispatch from resuming out-of-band
+      // once the user later answers the dialog.
+      dispatchAbort.abort();
+      return { dialog: outcome(dialog, false) };
+    }
 
     // Answer the dialog and any dialogs the same handler opens right after it
     // (for example a confirm followed by an alert).
@@ -222,10 +307,19 @@ export async function runCdpInputWithDialogs(
         ),
       ]);
     }
+    if (dialog) {
+      // Chained dialog cap reached while another dialog is still open: surface it
+      // as unhandled so callers and page-change detection know the tab is blocked.
+      dispatchAbort.abort();
+      const pending = outcome(dialog, false);
+      answered.push(pending);
+      return { dialog: pending, dialogs: answered };
+    }
     return answered.length > 1
       ? { dialog: answered[0], dialogs: answered }
       : { dialog: answered[0] };
   } finally {
+    dispatchAbort.abort();
     watcher.cancel();
     await cdpSessionManager.detach(tabId, owner);
   }

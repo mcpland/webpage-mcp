@@ -127,4 +127,31 @@ describe('legacy screenshot node', () => {
     });
     expect(ctx.vars.downloadInfo).toEqual({ id: 1, filename: 'report.pdf' });
   });
+
+  it('handles malformed or whitespace-only error screenshot results defensively', async () => {
+    mocks.handleCallTool.mockResolvedValueOnce({
+      isError: true,
+      content: [{ type: 'text', text: '   ' }],
+    });
+    const ctx = createMockExecCtx({ tabId: TAB_ID });
+
+    await expect(
+      screenshotNode.run(ctx, {
+        id: 'shot',
+        type: 'screenshot',
+        saveAs: 'capturedImage',
+      } as never),
+    ).rejects.toThrow('screenshot failed');
+
+    mocks.handleCallTool.mockResolvedValueOnce({
+      content: [{ type: 'image', data: 12345 } as any],
+    });
+    await expect(
+      screenshotNode.run(ctx, {
+        id: 'shot',
+        type: 'screenshot',
+        saveAs: 'capturedImage',
+      } as never),
+    ).rejects.toThrow('screenshot tool returned an empty response');
+  });
 });

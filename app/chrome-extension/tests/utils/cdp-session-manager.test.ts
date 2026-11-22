@@ -234,4 +234,54 @@ describe("CDPSessionManager", () => {
     expect(api.attach).toHaveBeenCalledOnce();
     expect(api.detach).toHaveBeenCalledOnce();
   });
+
+  it("notifies onExternalDetach listeners only for external detaches, not stale local detaches", async () => {
+    const { api, manager, notifyDetach, emitDetach, setAttached } =
+      createDebuggerHarness();
+    const externalDetaches: Array<[number, string]> = [];
+    const unsubscribe = manager.onExternalDetach((tabId, reason) => {
+      externalDetaches.push([tabId, reason]);
+    });
+
+    await manager.attach(41, "first-owner");
+    api.detach.mockImplementationOnce(async () => {
+      setAttached(false);
+    });
+    const detaching = manager.detach(41, "first-owner");
+    const reattaching = manager.attach(41, "second-owner");
+    await Promise.all([detaching, reattaching]);
+
+    // Late notification from the local detach must be filtered out.
+    notifyDetach("canceled_by_user");
+    expect(externalDetaches).toEqual([]);
+
+    // Genuine external detach must fire the listener.
+    emitDetach("canceled_by_user");
+    expect(externalDetaches).toEqual([[41, "canceled_by_user"]]);
+
+    unsubscribe();
+    await manager.attach(41, "third-owner");
+    emitDetach("target_closed");
+    expect(externalDetaches).toEqual([[41, "canceled_by_user"]]);
+  });
+
+  it("attachIfExisting acquires a lease only when a session is already active", async () => {
+    const { api, manager } = createDebuggerHarness();
+
+    await expect(manager.attachIfExisting(41, "dialog-pending")).resolves.toBe(
+      false,
+    );
+    expect(api.attach).not.toHaveBeenCalled();
+
+    await manager.attach(41, "click");
+    await expect(manager.attachIfExisting(41, "dialog-pending")).resolves.toBe(
+      true,
+    );
+    expect(api.attach).toHaveBeenCalledOnce();
+
+    await manager.detach(41, "click");
+    expect(api.detach).not.toHaveBeenCalled();
+    await manager.detach(41, "dialog-pending");
+    expect(api.detach).toHaveBeenCalledOnce();
+  });
 });

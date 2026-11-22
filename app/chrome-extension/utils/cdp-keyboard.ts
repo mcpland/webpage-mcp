@@ -86,12 +86,8 @@ const NAMED_KEYS: Record<string, KeyDefinition> = {
     ]),
   ),
   ...Object.fromEntries(
-    (Object.keys(MODIFIER_KEYS) as KeyModifier[]).map((name) => [name, MODIFIER_KEYS[name]]),
+    Object.entries(MODIFIER_ALIASES).map(([alias, modifier]) => [alias, MODIFIER_KEYS[modifier]]),
   ),
-  control: MODIFIER_KEYS.ctrl,
-  cmd: MODIFIER_KEYS.meta,
-  command: MODIFIER_KEYS.meta,
-  option: MODIFIER_KEYS.alt,
 };
 
 // US layout punctuation: unshifted character -> [code, keyCode, shifted character].
@@ -187,8 +183,11 @@ export function parseKeyStroke(
     const last = chord[chord.length - 1];
     const lastModifier = MODIFIER_ALIASES[last.toLowerCase()];
     if (lastModifier) {
-      // "Ctrl+Shift" presses the trailing modifier itself.
-      return { modifiers, key: MODIFIER_KEYS[lastModifier] };
+      // "Ctrl+Shift" presses the trailing modifier itself; avoid duplicating it if repeated.
+      return {
+        modifiers: modifiers.filter((modifier) => modifier !== lastModifier),
+        key: MODIFIER_KEYS[lastModifier],
+      };
     }
     const key = namedKey(last) ?? characterKey(last.length === 1 ? last : '');
     return key ? { modifiers, key } : undefined;
@@ -211,15 +210,15 @@ export function parseKeyStroke(
 export function parseKeyboardInput(input: string): KeyboardStep[] {
   const trimmed = input.trim();
   if (!trimmed) return input ? [{ kind: 'text', text: input }] : [];
-  const single = parseKeyStroke(trimmed);
+  // Do not silently strip surrounding spaces off a single literal character like " a ".
+  const single = parseKeyStroke(trimmed, { allowCharacter: input === trimmed });
   if (single) return [{ kind: 'stroke', stroke: single, token: trimmed }];
 
-  const commaTokens = input.includes(',')
-    ? input
-        .split(',')
-        .map((token) => token.trim())
-        .filter(Boolean)
-    : [];
+  const rawCommaParts = input.includes(',') ? input.split(',').map((token) => token.trim()) : [];
+  const commaTokens =
+    rawCommaParts.length > 1 && rawCommaParts.every((token) => token.length > 0)
+      ? rawCommaParts
+      : [];
   const candidates: Array<{ tokens: string[]; allowCharacter: boolean }> = [];
   if (commaTokens.length > 1) candidates.push({ tokens: commaTokens, allowCharacter: true });
   const spaceTokens = trimmed.split(/\s+/).filter(Boolean);
@@ -292,16 +291,27 @@ function editingCommandsFor(stroke: KeyStroke, mac: boolean): string[] {
   return [command];
 }
 
+const MODIFIER_BIT_BY_KEY = new Map<string, number>(
+  (Object.keys(MODIFIER_KEYS) as KeyModifier[]).map((modifier) => [
+    MODIFIER_KEYS[modifier].key,
+    MODIFIER_BITS[modifier],
+  ]),
+);
+
 /** Press and release `stroke`, holding its modifiers around the key. */
 export async function dispatchKeyStroke(
   dispatch: DispatchKeyEvent,
   stroke: KeyStroke,
-  options: { mac?: boolean } = {},
+  options: { mac?: boolean; signal?: AbortSignal } = {},
 ): Promise<void> {
+  if (options.signal?.aborted) return;
   const mac = options.mac ?? isMacPlatform();
   let mask = 0;
+  const pressedModifiers: KeyModifier[] = [];
   for (const modifier of stroke.modifiers) {
+    if (options.signal?.aborted) break;
     mask |= MODIFIER_BITS[modifier];
+    pressedModifiers.push(modifier);
     const definition = MODIFIER_KEYS[modifier];
     await dispatch({
       type: 'rawKeyDown',
@@ -313,34 +323,50 @@ export async function dispatchKeyStroke(
     });
   }
 
-  const { key } = stroke;
-  const shifted = (mask & MODIFIER_BITS.shift) !== 0;
-  const keyValue = shifted && key.shiftKey ? key.shiftKey : key.key;
-  // Characters are suppressed while Ctrl/Alt/Meta are held, as in a browser.
-  const commandHeld = (mask & (MODIFIER_BITS.alt | MODIFIER_BITS.ctrl | MODIFIER_BITS.meta)) !== 0;
-  const text =
-    key.text !== undefined && !commandHeld ? (shifted && key.shiftKey ? key.shiftKey : key.text) : undefined;
-  const commands = editingCommandsFor(stroke, mac);
-  await dispatch({
-    type: text ? 'keyDown' : 'rawKeyDown',
-    key: keyValue,
-    code: key.code,
-    windowsVirtualKeyCode: key.keyCode,
-    ...(text ? { text, unmodifiedText: text } : {}),
-    modifiers: mask,
-    location: key.location ?? 0,
-    ...(commands.length > 0 ? { commands } : {}),
-  });
-  await dispatch({
-    type: 'keyUp',
-    key: keyValue,
-    code: key.code,
-    windowsVirtualKeyCode: key.keyCode,
-    modifiers: mask,
-    location: key.location ?? 0,
-  });
+  if (!options.signal?.aborted) {
+    const { key } = stroke;
+    const shifted = (mask & MODIFIER_BITS.shift) !== 0;
+    // Characters are suppressed while Ctrl/Alt/Meta are held, as in a browser.
+    const commandHeld = (mask & (MODIFIER_BITS.alt | MODIFIER_BITS.ctrl | MODIFIER_BITS.meta)) !== 0;
+    // Chords like "Cmd+K" or "Ctrl+S" without Shift emit lowercase `key` in browsers.
+    const keyValue =
+      shifted && key.shiftKey
+        ? key.shiftKey
+        : commandHeld && !shifted && key.code.startsWith('Key')
+          ? key.key.toLowerCase()
+          : key.key;
+    const text =
+      key.text !== undefined && !commandHeld
+        ? shifted && key.shiftKey
+          ? key.shiftKey
+          : key.text
+        : undefined;
+    const commands = editingCommandsFor(stroke, mac);
+    const ownModifierBit = MODIFIER_BIT_BY_KEY.get(key.key) ?? 0;
+    await dispatch({
+      type: text ? 'keyDown' : 'rawKeyDown',
+      key: keyValue,
+      code: key.code,
+      windowsVirtualKeyCode: key.keyCode,
+      ...(text ? { text, unmodifiedText: text } : {}),
+      modifiers: mask | ownModifierBit,
+      location: key.location ?? 0,
+      ...(commands.length > 0 ? { commands } : {}),
+    });
+    if (!options.signal?.aborted) {
+      await dispatch({
+        type: 'keyUp',
+        key: keyValue,
+        code: key.code,
+        windowsVirtualKeyCode: key.keyCode,
+        modifiers: mask,
+        location: key.location ?? 0,
+      });
+    }
+  }
 
-  for (const modifier of [...stroke.modifiers].reverse()) {
+  for (const modifier of [...pressedModifiers].reverse()) {
+    if (options.signal?.aborted) return;
     mask &= ~MODIFIER_BITS[modifier];
     const definition = MODIFIER_KEYS[modifier];
     await dispatch({
