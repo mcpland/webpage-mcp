@@ -93,6 +93,41 @@ describe('page change summary', () => {
     expect(await observer.finish(okResult())).toBeUndefined();
   });
 
+  it.each(['commit', 'error'])('follows a new main-frame reload on a loading page until %s', async (outcome) => {
+    vi.useFakeTimers();
+    const original = chrome.webNavigation;
+    const event = () => ({ addListener: vi.fn(), removeListener: vi.fn() });
+    const events = { onBeforeNavigate: event(), onCommitted: event(), onErrorOccurred: event() };
+    Object.assign(chrome, { webNavigation: events });
+    try {
+      const tab = { id: 7, url: 'https://example.com/', title: 'Old', status: 'loading' as const };
+      tabs.set(7, tab);
+      const observer = (await observePageChanges(7, 0))!;
+      const details = { tabId: 7, frameId: 0, url: tab.url };
+      events.onBeforeNavigate.addListener.mock.calls[0]?.[0](details);
+      // The old document can finish before the replacement commits.
+      tabs.set(7, { ...tab, status: 'complete' });
+      const pending = observer.finish(okResult());
+      setTimeout(() => {
+        if (outcome === 'commit') {
+          tabs.set(7, { ...tab, status: 'complete', title: 'Reloaded' });
+          events.onCommitted.addListener.mock.calls[0]?.[0](details);
+        } else {
+          events.onErrorOccurred.addListener.mock.calls[0]?.[0](details);
+        }
+      }, 300);
+      await vi.advanceTimersByTimeAsync(400);
+      expect(await pending).toEqual(outcome === 'commit'
+        ? { navigated: true, url: tab.url, title: 'Reloaded' }
+        : undefined);
+      for (const source of Object.values(events)) {
+        expect(source.removeListener).toHaveBeenCalledWith(source.addListener.mock.calls[0][0]);
+      }
+    } finally {
+      Object.assign(chrome, { webNavigation: original });
+    }
+  });
+
   it('returns nothing when the page did not change', async () => {
     const observer = (await observePageChanges(7, 0))!;
     expect(await observer.finish(okResult())).toBeUndefined();

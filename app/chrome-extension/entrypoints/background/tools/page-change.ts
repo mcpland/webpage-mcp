@@ -140,6 +140,17 @@ export async function observePageChanges(
   let urlChanged = false;
   let sawLoading = false;
   let topFrameCommitted = false;
+  let pendingReloadUrl: string | undefined;
+  // On an already-loading tab a second load has no distinct tabs.onUpdated transition.
+  const navigation = before.status === 'loading' ? chrome.webNavigation : undefined;
+  const onBeforeNavigate = (details: chrome.webNavigation.WebNavigationParentedCallbackDetails) => {
+    if (details.tabId === tabId && details.frameId === 0) pendingReloadUrl = details.url;
+  };
+  const onNavigationError = (details: chrome.webNavigation.WebNavigationFramedErrorCallbackDetails) => {
+    if (details.tabId === tabId && details.frameId === 0 && details.url === pendingReloadUrl) {
+      pendingReloadUrl = undefined;
+    }
+  };
 
   const onCreated = (tab: chrome.tabs.Tab) => {
     if (tab.openerTabId === tabId && typeof tab.id === 'number') openedTabIds.add(tab.id);
@@ -156,6 +167,9 @@ export async function observePageChanges(
   chrome.tabs.onUpdated.addListener(onUpdated);
   if (hasWebNavigation) chrome.webNavigation.onCommitted.addListener(onCommitted);
 
+  navigation?.onBeforeNavigate?.addListener(onBeforeNavigate);
+  navigation?.onErrorOccurred?.addListener(onNavigationError);
+
   let stopped = false;
   const stop = () => {
     if (stopped) return;
@@ -163,6 +177,8 @@ export async function observePageChanges(
     chrome.tabs.onCreated.removeListener(onCreated);
     chrome.tabs.onUpdated.removeListener(onUpdated);
     if (hasWebNavigation) chrome.webNavigation.onCommitted.removeListener(onCommitted);
+    navigation?.onBeforeNavigate?.removeListener(onBeforeNavigate);
+    navigation?.onErrorOccurred?.removeListener(onNavigationError);
     signal?.removeEventListener('abort', stop);
   };
   signal?.addEventListener('abort', stop, { once: true });
@@ -187,6 +203,13 @@ export async function observePageChanges(
         if (signal?.aborted) return undefined;
         let after = await chrome.tabs.get(tabId).catch(() => undefined);
         if (signal?.aborted) return undefined;
+        const deadline = Date.now() + PAGE_CHANGE_LOAD_WAIT_MS;
+        const blocked = hasPendingDialog(result);
+        while (after && pendingReloadUrl !== undefined && !topFrameCommitted && !blocked && !signal?.aborted && Date.now() < deadline) {
+          await sleep(LOAD_POLL_MS, signal);
+          after = await chrome.tabs.get(tabId).catch(() => undefined);
+        }
+        if (signal?.aborted) return undefined;
         const urlDiffers = after !== undefined && currentUrl(after) !== beforeUrl;
         const startedLoading = before.status === 'complete' && after?.status === 'loading';
         // When webNavigation.onCommitted is available, ignore transient
@@ -197,11 +220,11 @@ export async function observePageChanges(
           (urlChanged ||
             urlDiffers ||
             topFrameCommitted ||
+            pendingReloadUrl !== undefined ||
             startedLoading ||
             (!hasWebNavigation && sawLoading));
         // A pending dialog blocks the page, so its navigation cannot finish.
-        if (navigated && !hasPendingDialog(result)) {
-          const deadline = Date.now() + PAGE_CHANGE_LOAD_WAIT_MS;
+        if (navigated && !blocked) {
           while (after && after.status !== 'complete' && !signal?.aborted && Date.now() < deadline) {
             await sleep(LOAD_POLL_MS, signal);
             if (signal?.aborted) return undefined;
@@ -216,7 +239,7 @@ export async function observePageChanges(
         } else if (navigated) {
           summary.navigated = true;
           Object.assign(summary, publicPageFields(after));
-          if (after.status !== 'complete') summary.loading = true;
+          if (after.status !== 'complete' || (pendingReloadUrl !== undefined && !topFrameCommitted)) summary.loading = true;
         }
         const newTabs = await describeNewTabs();
         if (newTabs.length > 0) summary.newTabs = newTabs;
