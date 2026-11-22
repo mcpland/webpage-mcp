@@ -24,7 +24,7 @@ import {
 } from './flow-tools';
 import { recordingStartTool, recordingStatusTool, recordingStopTool } from './recording';
 import { getSessionContext, patchSessionContext } from '../session-context';
-import { runInTabQueue } from '../tab-queue';
+import { runInTabQueue, runInTabRequestQueue } from '../tab-queue';
 import { observePageChanges, pageChangeSettleMs, withPageChange } from './page-change';
 
 const tools = {
@@ -96,8 +96,6 @@ const BACKGROUND_DEFAULT_SUPPORTED_TOOLS = new Set<string>([
 // may be blocked on (a JavaScript dialog opened by a click, a download started
 // by a click). Queuing them behind that interaction would deadlock the tab.
 const TAB_QUEUE_EXEMPT_TOOLS = new Set<string>([
-  // A flow waits for its own frame reads and other queued tool calls.
-  TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
   TOOL_NAMES.BROWSER.HANDLE_DIALOG,
   TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD,
 ]);
@@ -506,10 +504,20 @@ export const handleCallTool = async (param: ToolCallParam) => {
       throwIfToolAborted(param.signal);
       return result;
     };
-    const result =
-      typeof resolvedTarget.tabId === 'number' && !TAB_QUEUE_EXEMPT_TOOLS.has(param.name)
-        ? await runInTabQueue(resolvedTarget.tabId, execute, { signal: param.signal })
-        : await execute();
+    const tabId = resolvedTarget.tabId;
+    const executeForTarget = () => {
+      if (tabId === undefined || TAB_QUEUE_EXEMPT_TOOLS.has(param.name)) return execute();
+      const options = { signal: param.signal };
+      // A flow calls back into this router for individual steps. Holding the operation
+      // queue across the entire flow would make it wait for itself.
+      const runOperation = param.name === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN
+        ? execute
+        : () => runInTabQueue(tabId, execute, options);
+      return param.meta?.source || sessionId
+        ? runInTabRequestQueue(tabId, runOperation, options)
+        : runOperation();
+    };
+    const result = await executeForTarget();
 
     throwIfToolAborted(param.signal);
     if (sessionId && result?.isError !== true) {

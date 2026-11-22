@@ -86,7 +86,8 @@ vi.mock('@/entrypoints/background/session-context', () => ({
   patchSessionContext: mocks.patchSessionContext,
 }));
 
-vi.mock('@/entrypoints/background/tab-queue', () => ({
+vi.mock('@/entrypoints/background/tab-queue', async (original) => ({
+  ...await original<typeof import('@/entrypoints/background/tab-queue')>(),
   runInTabQueue: mocks.runInTabQueue,
 }));
 
@@ -473,7 +474,7 @@ describe('handleCallTool navigation routing', () => {
     ['record_replay_flow_run', 'flowRunExecute'],
     ['chrome_handle_dialog', 'dialogExecute'],
     ['chrome_handle_download', 'downloadExecute'],
-  ] as const)('runs %s outside the per-tab queue', async (name, executeKey) => {
+  ] as const)('runs %s outside the per-operation queue', async (name, executeKey) => {
     mocks[executeKey].mockResolvedValue({
       content: [{ type: 'text', text: '{"success":true}' }],
       isError: false,
@@ -487,6 +488,42 @@ describe('handleCallTool navigation routing', () => {
 
     expect(mocks[executeKey]).toHaveBeenCalled();
     expect(mocks.runInTabQueue).not.toHaveBeenCalled();
+  });
+
+  it('serializes a public flow with other requests while allowing its nested page reads', async () => {
+    const order: string[] = [];
+    let finishNavigation!: () => void;
+    let finishFlow!: () => void;
+    mocks.navigateExecute.mockImplementation(async () => {
+      order.push('navigate');
+      await new Promise<void>((resolve) => { finishNavigation = resolve; });
+      return { content: [] };
+    });
+    mocks.flowRunExecute.mockImplementation(async () => {
+      order.push('flow');
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId: 10 } });
+      order.push('read');
+      await new Promise<void>((resolve) => { finishFlow = resolve; });
+      return { content: [] };
+    });
+    mocks.screenshotExecute.mockImplementation(async () => {
+      order.push('screenshot');
+      return { content: [] };
+    });
+    const call = (name: string) => handleCallTool({
+      name, args: { tabId: 10 }, meta: { source: 'mcp' },
+    });
+    const navigation = call(TOOL_NAMES.BROWSER.NAVIGATE);
+    await vi.waitFor(() => expect(order).toEqual(['navigate']));
+    const flow = call(TOOL_NAMES.RECORD_REPLAY.FLOW_RUN);
+    const screenshot = call(TOOL_NAMES.BROWSER.SCREENSHOT);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(order).toEqual(['navigate']);
+    finishNavigation();
+    await vi.waitFor(() => expect(order).toEqual(['navigate', 'flow', 'read']));
+    finishFlow();
+    await Promise.all([navigation, flow, screenshot]);
+    expect(order).toEqual(['navigate', 'flow', 'read', 'screenshot']);
   });
 
   it('passes the call signal to the per-tab queue', async () => {

@@ -1781,7 +1781,7 @@ export const initNativeHostListener = () => {
 
     // Allow UI to call tools directly
     if (message && message.type === "call_tool" && message.name) {
-      handleCallTool({ name: message.name, args: message.args })
+      handleCallTool({ name: message.name, args: message.args, meta: { source: "ui" } })
         .then((res) => sendResponse({ success: true, result: res }))
         .catch((err) =>
           sendResponse({

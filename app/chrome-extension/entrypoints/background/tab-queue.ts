@@ -9,6 +9,7 @@
  */
 
 const tabQueueTails = new Map<number, Promise<void>>();
+const requestQueueTails = new Map<number, Promise<void>>();
 
 function createAbortError(): Error {
   const error = new Error('Tool execution cancelled');
@@ -29,13 +30,14 @@ function waitForTurn(previous: Promise<void>, signal?: AbortSignal): Promise<voi
   });
 }
 
-export async function runInTabQueue<T>(
+async function runInQueue<T>(
+  tails: Map<number, Promise<void>>,
   tabId: number,
   task: () => Promise<T>,
   options: { signal?: AbortSignal } = {},
 ): Promise<T> {
   const { signal } = options;
-  const previous = tabQueueTails.get(tabId) ?? Promise.resolve();
+  const previous = tails.get(tabId) ?? Promise.resolve();
 
   let release!: () => void;
   const released = new Promise<void>((resolve) => {
@@ -50,9 +52,9 @@ export async function runInTabQueue<T>(
   // Later entries wait for every earlier entry, so an entry released early by
   // its own abort still never lets a newcomer overtake a task that is running.
   const tail = previous.then(() => released);
-  tabQueueTails.set(tabId, tail);
+  tails.set(tabId, tail);
   void tail.then(() => {
-    if (tabQueueTails.get(tabId) === tail) tabQueueTails.delete(tabId);
+    if (tails.get(tabId) === tail) tails.delete(tabId);
   });
 
   try {
@@ -64,9 +66,19 @@ export async function runInTabQueue<T>(
   }
 }
 
+export function runInTabQueue<T>(tabId: number, task: () => Promise<T>, options?: { signal?: AbortSignal }) {
+  return runInQueue(tabQueueTails, tabId, task, options);
+}
+
+/** A public workflow owns the request queue while its steps use the operation queue. */
+export function runInTabRequestQueue<T>(tabId: number, task: () => Promise<T>, options?: { signal?: AbortSignal }) {
+  return runInQueue(requestQueueTails, tabId, task, options);
+}
+
 export function clearTabQueue(tabId: number): void {
   if (!Number.isFinite(tabId)) {
     return;
   }
   tabQueueTails.delete(tabId);
+  requestQueueTails.delete(tabId);
 }
