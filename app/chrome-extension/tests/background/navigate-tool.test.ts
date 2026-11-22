@@ -1105,9 +1105,14 @@ describe('navigateTool', () => {
     }
   });
 
-  it.each(['back', 'forward'] as const)('checks frame-local history for %s when another debugger owns the tab', async (direction) => {
+  it.each([
+    ['back', false], ['forward', false], ['back', true], ['forward', true],
+  ] as const)('checks frame-local history for %s under an external debugger (handoff: %s)', async (direction, handoff) => {
     vi.useFakeTimers();
     const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockRejectedValue(new Error('Debugger already attached'));
+    if (handoff) {
+      history.mockResolvedValueOnce({ currentIndex: direction === 'back' ? 1 : 0, entries: [{ id: 16 }, { id: 24 }] });
+    }
     const event = { addListener: vi.fn(), removeListener: vi.fn() };
     let key = 'unrelated-push';
     const executeScript = vi.fn(async ({ args }) => [

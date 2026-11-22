@@ -272,12 +272,15 @@ class NavigateTool extends BaseBrowserToolExecutor {
       ? await readWithSignal(() => navigation.getAllFrames({ tabId }).catch(() => null), signal)
       : null;
     const hasChildren = frames?.some((frame) => frame.frameId !== 0);
-    const before = hasChildren ? await readTabHistory(tabId, signal) : undefined;
+    // The debugger can change owners between the two observations. Capture both
+    // baselines before traversal so frame-local keys remain usable after a handoff.
+    const [before, frameEntries] = hasChildren ? await Promise.all([
+      readTabHistory(tabId, signal),
+      readFrameHistoryKeys(tabId, direction, signal),
+    ]) : [undefined, []] as const;
     const frameDestinations = new Map<number, Set<string>>();
-    if (hasChildren && !before) {
-      for (const { frameId, result } of await readFrameHistoryKeys(tabId, direction, signal)) {
-        if (result?.length) frameDestinations.set(frameId, new Set(result));
-      }
+    for (const { frameId, result } of frameEntries) {
+      if (result?.length) frameDestinations.set(frameId, new Set(result));
     }
     const destinations = before && new Set((direction === 'back'
       ? before.entries.slice(0, before.currentIndex)
@@ -308,9 +311,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const topTraversed = current.url && (current.url !== previousUrl || current.url === committedUrl);
         if (!topTraversed && childUpdated && !childTraversed) {
           childUpdated = false;
-          if (destinations?.size) {
-            const history = await readTabHistory(tabId, signal);
-            const entry = history?.entries[history.currentIndex];
+          const history = destinations?.size ? await readTabHistory(tabId, signal) : undefined;
+          if (history && destinations) {
+            const entry = history.entries[history.currentIndex];
             childTraversed = entry !== undefined && destinations.has(entry.id);
           } else if (frameDestinations.size) {
             const currentEntries = await readFrameHistoryKeys(tabId, 'current', signal);
