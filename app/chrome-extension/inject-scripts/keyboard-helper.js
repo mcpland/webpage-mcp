@@ -132,7 +132,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
    * @param {Element} element - Target element.
    * @returns {{success: boolean, error?: string}}
    */
-  function dispatchKeyEvents(parsedKeyInfo, element) {
+  function dispatchKeyEvents(parsedKeyInfo, element, edit) {
     if (!parsedKeyInfo) return { success: false, error: 'Invalid key info provided for dispatch.' };
 
     const { key, code, keyCode, charCode, modifiers } = parsedKeyInfo;
@@ -151,17 +151,21 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     };
 
     try {
-      const kdRes = element.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
+      let allowEdit = element.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
 
       // keypress is deprecated, but simulate if it's a character key or Enter
       // Only dispatch if keydown was not cancelled and it's a character producing key
-      if (kdRes && (key.length === 1 || key === 'Enter' || key === ' ')) {
+      if (allowEdit && (key.length === 1 || key === 'Enter' || key === ' ')) {
         const keypressOptions = { ...eventOptions };
         if (charCode) keypressOptions.charCode = charCode;
-        element.dispatchEvent(new KeyboardEvent('keypress', keypressOptions));
+        allowEdit = element.dispatchEvent(new KeyboardEvent('keypress', keypressOptions));
       }
 
-      element.dispatchEvent(new KeyboardEvent('keyup', eventOptions));
+      try {
+        if (allowEdit) edit?.();
+      } finally {
+        element.dispatchEvent(new KeyboardEvent('keyup', eventOptions));
+      }
       return { success: true };
     } catch (error) {
       console.error(`Error dispatching key events for "${key}":`, error);
@@ -172,6 +176,45 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     }
   }
 
+  function applyEdit(element, key, modifiers, text) {
+    if (!(element.matches('input, textarea') || element.isContentEditable)) return;
+    const commandKey = modifiers.ctrlKey || modifiers.metaKey;
+    let command;
+    if (commandKey && !modifiers.altKey && !modifiers.shiftKey && key.toLowerCase() === 'a') command = 'selectAll';
+    else if (!commandKey && !modifiers.altKey) {
+      if (text !== undefined) command = 'insertText';
+      else if (key === 'Backspace') command = 'delete';
+      else if (key === 'Delete') command = 'forwardDelete';
+      else if (key === 'Enter' && element.matches('input') && element.form) {
+        element.form.requestSubmit();
+        return;
+      } else if (key === 'Enter' && (element.matches('textarea') || element.isContentEditable)) {
+        command = 'insertLineBreak';
+      }
+    }
+    if (command && !document.execCommand(command, false, text)) {
+      throw new Error('The focused element did not accept the editing command: ' + command);
+    }
+  }
+
+  function dispatchStep(step, element) {
+    if (step.kind === 'text') {
+      for (const key of step.text) {
+        const info = { key, code: '', keyCode: 0, modifiers: {} };
+        const result = dispatchKeyEvents(info, element, () => applyEdit(element, key, {}, key));
+        if (!result.success) return result;
+      }
+      return { success: true };
+    }
+    const { key: definition, modifiers: names } = step.stroke;
+    const modifiers = Object.fromEntries(names.map((name) => [name + 'Key', true]));
+    const key = (modifiers.shiftKey && definition.shiftKey) || definition.key;
+    const text = definition.text !== undefined && key !== 'Enter' ? key : undefined;
+    return dispatchKeyEvents({ ...definition, key, modifiers }, element, () =>
+      applyEdit(element, key, modifiers, text),
+    );
+  }
+
   /**
    * Simulate keyboard events on an element or document
    * @param {string} keysSequenceString - String representation of key(s) (e.g., "Enter", "Ctrl+C, A, B")
@@ -179,47 +222,34 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
    * @param {number} delay - Delay between key sequences in milliseconds (optional)
    * @returns {Promise<Object>} - Result of the keyboard operation
    */
-  async function simulateKeyboard(keysSequenceString, targetElement = null, delay = 0) {
+  async function simulateKeyboard(keysSequenceString, targetElement = null, delay = 0, steps) {
     try {
-      const element = targetElement || document.activeElement || document.body;
+      let element = targetElement || document.activeElement || document.body;
+      while (!targetElement && element.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
 
       if (element !== document.activeElement && typeof element.focus === 'function') {
         element.focus();
         await new Promise((resolve) => setTimeout(resolve, 50)); // Small delay for focus
       }
 
-      const keyCombinations = keysSequenceString
+      const keyCombinations = steps ?? keysSequenceString
         .split(',')
         .map((k) => k.trim())
         .filter((k) => k.length > 0);
       const operationResults = [];
 
       for (let i = 0; i < keyCombinations.length; i++) {
-        const comboString = keyCombinations[i];
-        const parsedKeyInfo = parseSingleKeyCombination(comboString);
-
-        if (!parsedKeyInfo) {
-          operationResults.push({
-            keyCombination: comboString,
-            success: false,
-            error: `Invalid key string or combination: ${comboString}`,
-          });
-          continue; // Skip to next combination in sequence
-        }
-
-        const dispatchResult = dispatchKeyEvents(parsedKeyInfo, element);
+        const step = keyCombinations[i];
+        const comboString = steps ? (step.token ?? step.text) : step;
+        const dispatchResult = steps
+          ? dispatchStep(step, element)
+          : dispatchKeyEvents(parseSingleKeyCombination(comboString), element);
         operationResults.push({
           keyCombination: comboString,
           ...dispatchResult,
         });
 
-        if (dispatchResult.error) {
-          // Optionally, decide if sequence should stop on first error
-          // For now, we continue but log the error in results
-          console.warn(
-            `Failed to simulate key combination "${comboString}": ${dispatchResult.error}`,
-          );
-        }
+        if (steps && dispatchResult.error) break;
 
         if (delay > 0 && i < keyCombinations.length - 1) {
           await new Promise((resolve) => setTimeout(resolve, delay));
@@ -268,7 +298,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
         }
       }
 
-      simulateKeyboard(request.keys, targetEl, request.delay)
+      simulateKeyboard(request.keys, targetEl, request.delay, request.steps)
         .then(sendResponse)
         .catch((error) => {
           // This catch is for unexpected errors in simulateKeyboard promise chain itself

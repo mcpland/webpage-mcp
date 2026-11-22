@@ -3,6 +3,10 @@ import { join } from 'node:path';
 import { runInThisContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { computerTool } from '@/entrypoints/background/tools/browser/computer';
+import { keyboardTool } from '@/entrypoints/background/tools/browser/keyboard';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
+
 type RuntimeListener = (
   request: Record<string, unknown>,
   sender: chrome.runtime.MessageSender,
@@ -103,6 +107,49 @@ describe('keyboard-helper page protocol', () => {
         { type: 'keydown', key: 'Enter', ctrlKey: false, shiftKey: false },
       ]),
     );
+  });
+
+  it.each([
+    ['type', 'Enter'],
+    ['keyboard', 'Hello, 世界'],
+  ])('edits the focused field through the %s fallback', async (tool, text) => {
+    const input = document.createElement('input');
+    input.value = 'old';
+    document.body.append(input);
+    input.focus();
+    input.setSelectionRange(3, 3);
+    const keydown: string[] = [];
+    input.addEventListener('keydown', (event) => keydown.push(event.key));
+    // jsdom has no editing commands. Model the native selection and edits they perform.
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: (command: string, _ui: boolean, value: string) => {
+        if (command === 'selectAll') input.select();
+        else if (command === 'delete' || command === 'insertText') {
+          input.setRangeText(value || '', input.selectionStart!, input.selectionEnd!, 'end');
+        } else return false;
+        return true;
+      },
+    });
+    const listener = executeHelper();
+    try {
+      const tab = { id: 7, url: 'https://example.test/', active: true };
+      vi.spyOn(cdpSessionManager, 'attach').mockRejectedValue(new Error('Debugger busy'));
+      vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(tab);
+      vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue(tab);
+      vi.spyOn(keyboardTool as any, 'injectContentScript').mockResolvedValue(undefined);
+      vi.spyOn(keyboardTool as any, 'sendMessageToTab').mockImplementation(
+        async (_tabId, request) => dispatch(listener, request as Record<string, unknown>),
+      );
+      const result = tool === 'type'
+        ? await computerTool.execute({ action: 'type', text, clear: true, tabId: 7, background: true })
+        : await keyboardTool.execute({ keys: text, tabId: 7, background: true });
+      expect(result.isError).toBe(false);
+      expect(input.value).toBe(tool === 'type' ? text : 'old' + text);
+      expect(keydown).toEqual(tool === 'type' ? ['a', 'Backspace', ...text] : [...text]);
+    } finally {
+      Reflect.deleteProperty(document, 'execCommand');
+    }
   });
 
   it('reports missing targets and malformed key combinations without dispatching', async () => {

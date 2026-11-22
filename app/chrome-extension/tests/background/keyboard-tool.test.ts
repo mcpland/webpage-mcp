@@ -270,12 +270,23 @@ describe('keyboardTool', () => {
       7,
       {
         action: 'simulateKeyboard',
+        steps: [expect.objectContaining({ kind: 'stroke', token: 'Enter' })],
         keys: 'Enter',
         selector: undefined,
         delay: 50,
       },
       12,
     );
+  });
+
+  it('surfaces a failed helper result even when it only has a message', async () => {
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue(makeTab({ url: 'https://example.test/' }));
+    vi.spyOn(keyboardTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(keyboardTool as any, 'sendMessageToTab').mockResolvedValue({ success: false, message: 'Edit failed' });
+    mocks.attach.mockRejectedValue(new Error('Debugger busy'));
+    const result = await keyboardTool.execute({ keys: 'Hello', tabId: 7, background: true });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({ type: 'text', text: 'Edit failed' });
   });
 
   it('rejects file URL tabs before simulating keyboard input', async () => {

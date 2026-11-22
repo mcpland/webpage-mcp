@@ -14,7 +14,7 @@ import {
   scaleCoordinates,
 } from '@/utils/screenshot-context';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
-import { dispatchKeyStroke, parseKeySequence } from '@/utils/cdp-keyboard';
+import { dispatchKeyStroke, parseKeyboardInput, parseKeySequence, type KeyboardStep } from '@/utils/cdp-keyboard';
 import {
   PageUnresponsiveError,
   pendingDialogHint,
@@ -1177,25 +1177,12 @@ class ComputerTool extends BaseBrowserToolExecutor {
           };
         } catch (e) {
           if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
-          // Fallback to DOM-based keyboard tool, one step at a time
-          const steps = [
-            ...(params.clear === true ? [CLEAR_FIELD_KEYS] : []),
-            ...(params.text ? [params.text] : []),
-            ...(params.submit === true ? ['Enter'] : []),
-          ];
-          let res: ToolResult = createErrorResponse('Nothing to type');
-          for (const keys of steps) {
-            res = await keyboardTool.execute({
-              keys,
-              delay: 0,
-              selector: undefined,
-              tabId: tab.id,
-              windowId: tab.windowId,
-              background: params.background === true,
-            });
-            if (res.isError) return res;
-          }
-          return res;
+          const steps: KeyboardStep[] = [];
+          if (params.clear) steps.push(...parseKeyboardInput(CLEAR_FIELD_KEYS));
+          if (params.text) steps.push({ kind: 'text', text: params.text });
+          if (params.submit) steps.push(...parseKeyboardInput('Enter'));
+          const frameId = resolveRefTarget(params.ref, params.frameId)?.frameId ?? params.frameId;
+          return keyboardTool.sendHelperSteps(tab.id!, params.text || '', steps, 0, undefined, frameId);
         }
       }
       case 'fill': {

@@ -5,7 +5,7 @@ import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { hasDisallowedPublicUrlScheme } from './common';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
-import { dispatchKeyStroke, parseKeyboardInput } from '@/utils/cdp-keyboard';
+import { dispatchKeyStroke, parseKeyboardInput, type KeyboardStep } from '@/utils/cdp-keyboard';
 import {
   PageUnresponsiveError,
   pendingDialogHint,
@@ -79,41 +79,39 @@ export function pressKeysOnFocusedElement(
   });
 }
 
-async function dispatchHelperKeySequence(
-  tool: any,
-  tabId: number,
-  keys: string,
-  delay: number,
-  selector: string | undefined,
-  frameId: number | undefined,
-): Promise<any> {
-  const frameIds = typeof frameId === 'number' ? [frameId] : undefined;
-  await tool.injectContentScript(
-    tabId,
-    ['inject-scripts/keyboard-helper.js'],
-    false,
-    'ISOLATED',
-    false,
-    frameIds,
-  );
-
-  return tool.sendMessageToTab(
-    tabId,
-    {
-      action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD,
-      keys,
-      selector,
-      delay,
-    },
-    frameId,
-  );
-}
-
 /**
  * Tool for simulating keyboard input on web pages
  */
 class KeyboardTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.KEYBOARD;
+
+  async sendHelperSteps(
+    tabId: number,
+    keys: string,
+    steps: KeyboardStep[],
+    delay: number,
+    selector?: string,
+    frameId?: number,
+  ): Promise<ToolResult> {
+    try {
+      const frames = typeof frameId === 'number' ? [frameId] : undefined;
+      await this.injectContentScript(tabId, ['inject-scripts/keyboard-helper.js'], false, 'ISOLATED', false, frames);
+      const result = await this.sendMessageToTab(tabId, {
+        action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD, keys, steps, selector, delay,
+      }, frameId);
+      if (!result?.success || result.error) {
+        return createErrorResponse(result?.error || result?.message || 'Keyboard helper failed');
+      }
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          success: true, message: result.message, transport: 'helper', selector, keys,
+        }) }],
+        isError: false,
+      };
+    } catch (error) {
+      return createErrorResponse(`Keyboard helper failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   /**
    * Execute keyboard operation
@@ -253,35 +251,10 @@ class KeyboardTool extends BaseBrowserToolExecutor {
           '[KeyboardTool] CDP keyboard dispatch failed, falling back to helper',
           cdpError,
         );
-        const helperResult = await dispatchHelperKeySequence(
-          this,
-          targetTabId,
-          keys,
-          delay,
-          refForFocus ? undefined : finalSelector,
-          targetFrameId,
+        return this.sendHelperSteps(
+          targetTabId, keys, parseKeyboardInput(keys), delay,
+          refForFocus ? undefined : finalSelector, targetFrameId,
         );
-
-        if (helperResult?.error) {
-          return createErrorResponse(helperResult.error);
-        }
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                message:
-                  helperResult.message || 'Keyboard operation successful',
-                transport: 'helper',
-                selector: finalSelector,
-                keys,
-              }),
-            },
-          ],
-          isError: false,
-        };
       }
 
       return {
