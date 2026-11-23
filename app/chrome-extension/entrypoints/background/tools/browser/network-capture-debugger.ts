@@ -1,6 +1,7 @@
 import { getCaptureTab, PendingInheritedCaptures } from './network-capture-inheritance';
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
+import { readWithSignal } from '@/utils/read-with-signal';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { NETWORK_FILTERS } from '@/common/constants';
@@ -269,6 +270,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
         storedBytes: 0,
         responseBodyBytes: 0,
         bodyReads: new AbortController(),
+        finishingRequests: new Map<NetworkRequestInfo, Promise<void>>(),
         rootTabId: options.rootTabId ?? tabId,
         lineageDepth: options.lineageDepth ?? 0,
         deadlineAt,
@@ -622,7 +624,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     // console.log(`NetworkDebuggerStartTool: Received response for ${requestId} on tab ${tabId}: ${response.status}`);
   }
 
-  private async handleLoadingFinished(tabId: number, params: any) {
+  private handleLoadingFinished(tabId: number, params: any) {
     const captureInfo = this.captureData.get(tabId);
     if (!captureInfo) return;
 
@@ -634,6 +636,13 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       return;
     }
 
+    const processing = this.finishRequest(tabId, captureInfo, requestInfo, requestId, encodedDataLength);
+    captureInfo.finishingRequests.set(requestInfo, processing);
+    return processing.finally(() => captureInfo.finishingRequests.delete(requestInfo));
+  }
+
+  private async finishRequest(tabId: number, captureInfo: any, requestInfo: NetworkRequestInfo,
+    requestId: string, encodedDataLength: number) {
     const normalizedEncodedLength = normalizeEventTime(encodedDataLength);
     this.setRequestField(
       captureInfo,
@@ -824,7 +833,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     return responseBodyPromise;
   }
 
-  private cleanupCapture(tabId: number) {
+  private cleanupCapture(tabId: number, drainBodies = false) {
     if (this.captureTimers.has(tabId)) {
       clearTimeout(this.captureTimers.get(tabId)!);
       this.captureTimers.delete(tabId);
@@ -835,7 +844,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     }
 
     this.lastActivityTime.delete(tabId);
-    this.captureData.get(tabId)?.bodyReads.abort();
+    if (!drainBodies) this.captureData.get(tabId)?.bodyReads.abort();
     this.captureData.delete(tabId);
     this.requestCounters.delete(tabId);
 
@@ -930,7 +939,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
 
     // Clear active state synchronously before awaiting CDP commands so
     // concurrent stop calls coalesce and no timers fire after stop begins.
-    this.cleanupCapture(tabId);
+    this.cleanupCapture(tabId, true);
     const childrenStopped = this.pendingInheritedTabs.cancel(tabId, 'openerTabId');
 
     let explicitStopJoined = !isAutoStop;
@@ -942,7 +951,24 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       try {
         // Attempt to disable network and detach via manager; it will no-op if others own the session
         try {
-          await disableCaptureNetwork(tabId);
+          const requests: Map<NetworkRequestInfo, Promise<void>> = captureInfo.finishingRequests;
+          const drain = () => readWithSignal(
+            () => Promise.allSettled(requests.values()), AbortSignal.timeout(250),
+          ).catch(() => undefined);
+          try {
+            // Disabling Network may invalidate a body that Chrome is still reading.
+            if (requests.size) await drain();
+            await disableCaptureNetwork(tabId);
+          } finally {
+            // Some buffered replies become available only when Network is disabled.
+            if (requests.size) await drain();
+            captureInfo.bodyReads.abort();
+            for (const request of requests.keys()) {
+              if (request.responseBody === undefined && !request.responseBodyOmitted && !request.errorText) {
+                this.setRequestField(captureInfo, request, 'responseBodyOmitted', 'capture_stopped');
+              }
+            }
+          }
         } catch (e) {
           console.warn(
             `NetworkDebuggerStartTool: Error disabling network for tab ${tabId} (possibly already detached):`,

@@ -270,6 +270,34 @@ describe('network capture backend boundaries', () => {
     expect(backend.hasAvailableCapture()).toBe(false);
   });
 
+  it.each(['before disable', 'during disable'])('keeps a completed response body delivered %s', async phase => {
+    const { networkDebuggerStartTool: backend } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-debugger'
+    );
+    vi.mocked(chrome.tabs.get).mockImplementation(async id => tab(id));
+    const active = backend as any;
+    await active.startCaptureForTab(7, { maxCaptureTime: 30_000, inactivityTimeout: 10_000, includeStatic: true });
+    active.handleRequestWillBeSent(7, { requestId: 'body', request: {
+      url: 'https://example.com/api/data', method: 'GET', headers: {},
+    }, timestamp: 1, type: 'Fetch' });
+    active.handleResponseReceived(7, { requestId: 'body', response: {
+      status: 200, mimeType: 'application/json', headers: {},
+    }, timestamp: 2, type: 'Fetch' });
+    let deliver!: (value: unknown) => void;
+    cdp.sendCommand.mockImplementation(async (_id, method) => {
+      if (method === 'Network.getResponseBody') return new Promise(resolve => {
+        deliver = resolve;
+        if (phase === 'before disable') setTimeout(() => deliver({ body: 'complete' }), 15);
+      });
+      if (method === 'Network.disable') deliver({ body: phase === 'before disable' ? 'invalidated' : 'complete', base64Encoded: false });
+      return {};
+    });
+    const reading = active.handleLoadingFinished(7, { requestId: 'body', encodedDataLength: 8 });
+    const result = await active.stopCapture(7);
+    await reading;
+    expect(result.data.requests[0].responseBody).toBe('complete');
+  });
+
   it('cancels an outstanding child response-body read when all captures stop', async () => {
     const { networkDebuggerStartTool: backend, networkDebuggerStopTool: stop } = await import(
       '@/entrypoints/background/tools/browser/network-capture-debugger'
