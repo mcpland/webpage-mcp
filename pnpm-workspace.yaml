@@ -4,7 +4,7 @@ packages:
 
 overrides:
   "@babel/core": 7.29.6
-  "@hono/node-server": 2.0.10
+  "@hono/node-server": 2.1.11
   "@protobufjs/utf8": 1.1.1
   "minimatch@<4": 3.1.4
   "minimatch@>=10 <11": 10.2.3
@@ -14,10 +14,10 @@ overrides:
   defu: 6.1.5
   esbuild: 0.28.1
   express-rate-limit: 8.2.2
-  body-parser: 2.3.0
-  fast-uri: 3.1.8
+  body-parser: 2.4.0
+  fast-uri: 3.1.9
   flatted: 3.4.2
-  hono: 4.13.13
+  hono: 4.13.21
   ip-address: 10.7.4
   js-yaml: 4.2.0
   linkify-it: 5.0.2
@@ -26,7 +26,7 @@ overrides:
   path-to-regexp: 8.4.0
   protobufjs: 7.6.5
   proxy-addr: 2.0.8
-  qs: 6.16.0
+  qs: 6.17.1
   sharp: 0.35.5
   shell-quote: 1.8.4
   tmp: 0.2.7

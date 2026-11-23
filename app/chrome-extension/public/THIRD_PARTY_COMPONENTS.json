@@ -99,12 +99,12 @@
     },
     {
       "name": "@hono/node-server",
-      "version": "2.0.10",
-      "resolved": "https://registry.npmjs.org/@hono/node-server/-/node-server-2.0.10.tgz",
-      "integrity": "sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==",
+      "version": "2.1.11",
+      "resolved": "https://registry.npmjs.org/@hono/node-server/-/node-server-2.1.11.tgz",
+      "integrity": "sha512-KzKz9vl4vvr1vgLHamj+g5uonbrj5NwAdO3yzOS6cd2HjALVeOgTgeZOyAzNxejbkfOOPIcvuf/Tg8l1pEFLog==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "c864dc402e9c5fffd9656afb37bb0dc244bdc0d0a019c6a885772e08035d3b92",
+      "packageJsonSha256": "c48ce379bffa4bdf3f9eb3c9cfd45b7be14e61370045f8a9f9d83207c8fe275e",
       "licenseEvidence": [
         {
           "path": "LICENSE",
@@ -751,12 +751,12 @@
     },
     {
       "name": "@modelcontextprotocol/sdk",
-      "version": "1.31.0",
-      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.31.0.tgz",
-      "integrity": "sha512-UvTMgnNlnIBO/22ob2RcVGDlcvOslQs8T59+FTGdA0L27a39fdGF/EDETNtDVK4DZGpwomlsYpRdA8UXcVL/pw==",
+      "version": "1.32.2",
+      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.32.2.tgz",
+      "integrity": "sha512-SWsVtH/0vULSQStoZ6xxH2K09Li8fXYTMC64ZeogCdpZ3XSi1eCPOByV1OpuJxuI3OcmHhosDWYyii07tpPsLw==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "db4753c0bcdc297ef0dd5f6573219e461270e542146d6574de0ef80dde0f7b4b",
+      "packageJsonSha256": "7a8d6f79ee52e2bf7cfe23f2d79f7e3c0ab6a3912a340ec345d6ff014534d59d",
       "licenseEvidence": [
         {
           "path": "LICENSE",
@@ -1206,19 +1206,19 @@
     },
     {
       "name": "body-parser",
-      "version": "2.3.0",
-      "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-2.3.0.tgz",
-      "integrity": "sha512-2cGmJupaNgg+QUwVLAucDuWuoMZ6EX9iHDRswZ5lsNYEmwPaRknMPCLZz07yTzVq/83p4o/wzbDZbBrTvGGTIw==",
+      "version": "2.4.0",
+      "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-2.4.0.tgz",
+      "integrity": "sha512-Ifk1KcLrxaGt1occQagQNFNNOqRt1LFuehEnHHzB8Z6cRgIxRU1TBaiIsUiCdA+gy5PL7Y1IX31DNKkRmxtXjQ==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "ae841913f51a2b463ba86e011564784654dad953352dc972baf59f87da4b2d36",
+      "packageJsonSha256": "9410a56eb52cfe53ec48f013c872d4d336bb1cad66ea166bf3d97d2807bf542a",
       "licenseEvidence": [
         {
           "path": "LICENSE",
           "sha256": "23d466b1b134b415b66fa50c6526b4cf3e7b9258554da88d3abb371721e7ce68"
         }
       ],
-      "sourceUrl": "https://registry.npmjs.org/body-parser/-/body-parser-2.3.0.tgz",
+      "sourceUrl": "https://registry.npmjs.org/body-parser/-/body-parser-2.4.0.tgz",
       "patch": null,
       "review": []
     },
@@ -1363,6 +1363,24 @@
         }
       ],
       "sourceUrl": "https://registry.npmjs.org/content-type/-/content-type-2.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "content-type",
+      "version": "2.1.0",
+      "resolved": "https://registry.npmjs.org/content-type/-/content-type-2.1.0.tgz",
+      "integrity": "sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "33102772db7c8375395bdcc11e7004c597b4cdbe457d8dd0ae2e56f5a2d28637",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/content-type/-/content-type-2.1.0.tgz",
       "patch": null,
       "review": []
     },
@@ -1964,12 +1982,12 @@
     },
     {
       "name": "fast-uri",
-      "version": "3.1.8",
-      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.8.tgz",
-      "integrity": "sha512-GZMtZUTNRpOVIECoXwLNZS5xUGE+mVNbTB8h/7Rwh2TFWcBQiPzTgyZi05BF9UMZKkLJv8XBRJTlU7zg8+ZfMg==",
+      "version": "3.1.9",
+      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.9.tgz",
+      "integrity": "sha512-hS/0Wt3Ya043oKXs0sIxrMpKQITXhMLIrVAKKXi4gozGC9v7YRWVnXIZzjNPTO02M9BdxLCWqK1yRXgNziVyJQ==",
       "declaredLicense": "BSD-3-Clause",
       "concludedLicense": "BSD-3-Clause",
-      "packageJsonSha256": "30cad05aad3d3596513706451dbfc7e0422f9c1d00f2903ecc34580327d54bc7",
+      "packageJsonSha256": "06728ad83c4df979c6895d089452622441e34afe9b1c24584e2acac8d94a2876",
       "licenseEvidence": [
         {
           "path": "LICENSE",
@@ -2251,12 +2269,12 @@
     },
     {
       "name": "hono",
-      "version": "4.13.13",
-      "resolved": "https://registry.npmjs.org/hono/-/hono-4.13.13.tgz",
-      "integrity": "sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA==",
+      "version": "4.13.21",
+      "resolved": "https://registry.npmjs.org/hono/-/hono-4.13.21.tgz",
+      "integrity": "sha512-h9UsguqfVk4kjUwLvQpHOmOaJpW10jz9lp8bvKUUa04wJG/fabKFBqXZ06D6LFaeKQZtUZRVeg0gfkTTEsX7Mw==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "169a02072e32d85aacb089ad14b62b027d975479d811f741771fbd0f559fb5c9",
+      "packageJsonSha256": "ec49d75827b66487ef44c0c37489b809787cf5e8112226943ec3e56312aa885d",
       "licenseEvidence": [
         {
           "path": "LICENSE",
@@ -2293,6 +2311,24 @@
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
       "packageJsonSha256": "6b82b2d7c3b90ebb2412fb135bc65ef1466c433eec92115b0336db4d61c11bd2",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "ac779f7314c74f232ef847ea86e714abe25cf6eeb5cc97b69451b74e2af6492d"
+        }
+      ],
+      "sourceUrl": "https://github.com/pillarjs/iconv-lite",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "iconv-lite",
+      "version": "0.7.3",
+      "resolved": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.7.3.tgz",
+      "integrity": "sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "f24ad03476d51470a5b069e65b03ef6383d615897ffe2239edf22584ea0e3d03",
       "licenseEvidence": [
         {
           "path": "LICENSE",
@@ -3153,12 +3189,12 @@
     },
     {
       "name": "qs",
-      "version": "6.16.0",
-      "resolved": "https://registry.npmjs.org/qs/-/qs-6.16.0.tgz",
-      "integrity": "sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==",
+      "version": "6.17.1",
+      "resolved": "https://registry.npmjs.org/qs/-/qs-6.17.1.tgz",
+      "integrity": "sha512-jd3COkaKVgGUW+ZHyEHCG9bH7RoaaiWuMgzsIBjUMVjLAaWGWpoUAVwljVvBHxRu/2qEHnadLGZrkutYUBPQJA==",
       "declaredLicense": "BSD-3-Clause",
       "concludedLicense": "BSD-3-Clause",
-      "packageJsonSha256": "69d58ca5abcff9be3f6becc70940caa76d8ec1b72ef7d2d735305c16cb877dca",
+      "packageJsonSha256": "863f2d7bdf692921c2d743280760cb486db0fad3984f41ea195486f152ffaa84",
       "licenseEvidence": [
         {
           "path": "LICENSE.md",
@@ -3774,12 +3810,12 @@
     },
     {
       "name": "zod",
-      "version": "3.25.76",
-      "resolved": "https://registry.npmjs.org/zod/-/zod-3.25.76.tgz",
-      "integrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==",
+      "version": "4.6.7",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "70eedbe34fd52385a4ae2f3e5759b19682189f0118ea73a6e7c32c677f61668e",
+      "packageJsonSha256": "c2d190d9ee4e0bdb60332aaa2130a6a98d65ddb903fe1d29248b15de57832c45",
       "licenseEvidence": [
         {
           "path": "LICENSE",

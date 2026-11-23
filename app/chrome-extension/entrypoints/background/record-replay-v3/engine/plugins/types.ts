@@ -18,7 +18,7 @@ import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
  * Schema Type
  * @description Use Zod for configuration verification
  */
-export type Schema<T> = z.ZodType<T, z.ZodTypeDef, unknown>;
+export type Schema<T> = z.ZodType<T>;
 
 /**
  * node execution context

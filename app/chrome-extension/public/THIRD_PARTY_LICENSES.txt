@@ -96,7 +96,7 @@ SOFTWARE.
 ===============================================================================
 LICENSE MATERIAL 2
 Applies to:
-  - @modelcontextprotocol/sdk@1.31.0 (declared, type-only in current bundle)
+  - @modelcontextprotocol/sdk@1.32.2 (declared, type-only in current bundle)
 Source material:
   - app/chrome-extension/node_modules/@modelcontextprotocol/sdk/LICENSE
 ===============================================================================
@@ -925,7 +925,7 @@ SOFTWARE.
 ===============================================================================
 LICENSE MATERIAL 10
 Applies to:
-  - zod@3.25.76
+  - zod@4.6.7
 Source material:
   - app/chrome-extension/node_modules/zod/LICENSE
 ===============================================================================
