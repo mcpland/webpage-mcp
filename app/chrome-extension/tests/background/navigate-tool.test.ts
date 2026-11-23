@@ -1168,25 +1168,45 @@ describe('navigateTool', () => {
     expect(inspectFrameHistory('current')).toBe(1);
   });
 
-  it('observes a consumed legacy popstate only while trusted and restores the original method', async () => {
+  it.each(['event', 'prototype', 'cached method with event state', 'cached method with history state'])('observes trusted popstate consumed through the %s and restores its descriptor', async route => {
     const nativeStop = vi.fn();
-    class BaseEvent { stopImmediatePropagation = nativeStop; }
-    Object.defineProperty(BaseEvent.prototype, 'stopImmediatePropagation', { value: nativeStop });
-    class LegacyPopState extends BaseEvent {}
-    const frame = { PopStateEvent: LegacyPopState, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    class BaseEvent { stopImmediatePropagation() { nativeStop(); } }
+    const payload = { position: 1 };
+    class LegacyPopState extends BaseEvent { get state() { return payload; } }
+    class LegacyHistory { get state() { return payload; } }
+    const frame = {
+      Event: BaseEvent, PopStateEvent: LegacyPopState, History: LegacyHistory, history: new LegacyHistory(),
+      event: undefined as LegacyPopState | undefined, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      // The previous extension can still have a traversal in flight during an upgrade.
+      [Symbol.for('webpageMcp.consumedPopstate')]: new Set(),
+    };
     vi.stubGlobal('window', frame);
+    const original = Object.getOwnPropertyDescriptor(BaseEvent.prototype, 'stopImmediatePropagation');
+    const originalState = Object.getOwnPropertyDescriptor(LegacyPopState.prototype, 'state');
+    const originalHistoryState = Object.getOwnPropertyDescriptor(LegacyHistory.prototype, 'state');
     const previous = watchConsumedPopstate('previous', 1000);
     const observed = watchConsumedPopstate('stop', 1000);
     frame.addEventListener.mock.calls[0][1]();
     expect(await previous).toBe(false);
-    const stop = LegacyPopState.prototype.stopImmediatePropagation;
-    const event = { type: 'popstate', target: frame, eventPhase: 2, isTrusted: false };
+    const event = Object.assign(new LegacyPopState(), { type: 'popstate', target: frame, eventPhase: 2, isTrusted: false });
+    const stop = route.startsWith('cached method') ? original!.value :
+      route === 'prototype' ? BaseEvent.prototype.stopImmediatePropagation : event.stopImmediatePropagation;
     stop.call(event);
-    expect(Object.hasOwn(LegacyPopState.prototype, 'stopImmediatePropagation')).toBe(true);
-    stop.call({ ...event, isTrusted: true });
+    expect(BaseEvent.prototype.stopImmediatePropagation).not.toBe(original!.value);
+    event.isTrusted = true;
+    stop.call(event);
+    if (route === 'cached method with event state') expect(event.state).toBe(payload);
+    if (route === 'cached method with history state') {
+      expect(frame.history.state).toBe(payload);
+      expect(BaseEvent.prototype.stopImmediatePropagation).not.toBe(original!.value);
+      frame.event = event;
+      expect(frame.history.state).toBe(payload);
+    }
     await expect(observed).resolves.toBe(true);
+    expect(Object.getOwnPropertyDescriptor(LegacyPopState.prototype, 'state')).toEqual(originalState);
+    expect(Object.getOwnPropertyDescriptor(LegacyHistory.prototype, 'state')).toEqual(originalHistoryState);
     expect(nativeStop).toHaveBeenCalledTimes(2);
-    expect(Object.hasOwn(LegacyPopState.prototype, 'stopImmediatePropagation')).toBe(false);
+    expect(Object.getOwnPropertyDescriptor(BaseEvent.prototype, 'stopImmediatePropagation')).toEqual(original);
   });
 
   it('detects an observer installed after document start without exposing history state', () => {

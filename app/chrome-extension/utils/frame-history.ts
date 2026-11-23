@@ -33,34 +33,70 @@ export function inspectFrameHistory(direction: FrameHistoryRead | 'observe'): st
  */
 export function watchConsumedPopstate(stopEvent: string, remainingMs: number): Promise<boolean> {
   return new Promise(resolve => {
-    const prototype = window.PopStateEvent?.prototype;
-    if (!prototype) return resolve(false);
-    const key = Symbol.for('webpageMcp.consumedPopstate');
-    const scope = window as Window & { [key]?: Set<() => void> };
-    let observers = scope[key];
-    if (!observers) {
-      if (Object.hasOwn(prototype, 'stopImmediatePropagation') || !Object.isExtensible(prototype)) {
-        return resolve(false);
-      }
-      const original = prototype.stopImmediatePropagation;
-      function observed(this: Event) {
-        original.call(this);
-        if (this.isTrusted && this.type === 'popstate' && this.target === window && this.eventPhase !== 0) {
-          for (const notify of observers!) notify();
+    const prototype = window.Event?.prototype;
+    const PopState = window.PopStateEvent;
+    if (!prototype || typeof PopState !== 'function') return resolve(false);
+    const key = Symbol.for('webpageMcp.consumedPopstate.v2');
+    type Observation = { observers: Set<() => void>; restore: () => void };
+    const scope = window as Window & { [key]?: Observation };
+    let observation = scope[key];
+    if (!observation) {
+      // Both event.stopImmediatePropagation() and an explicit call through
+      // Event.prototype reach this native method in the legacy document.
+      const stop = Object.getOwnPropertyDescriptor(prototype, 'stopImmediatePropagation');
+      const observers = new Set<() => void>();
+      const observe = (event: Event | undefined) => {
+        if (event instanceof PopState && event.isTrusted && event.type === 'popstate' &&
+            event.target === window && event.eventPhase !== 0) {
+          for (const notify of observers) notify();
         }
+      };
+      const restorers: Array<() => void> = [];
+      if (stop?.writable && typeof stop.value === 'function') {
+        const originalStop = stop.value;
+        function observedStop(this: Event) {
+          const result = originalStop.call(this);
+          observe(this);
+          return result;
+        }
+        Object.defineProperty(prototype, 'stopImmediatePropagation', { ...stop, value: observedStop });
+        restorers.push(() => {
+          if (Object.getOwnPropertyDescriptor(prototype, 'stopImmediatePropagation')?.value === observedStop) {
+            Object.defineProperty(prototype, 'stopImmediatePropagation', stop);
+          }
+        });
       }
-      Object.defineProperty(prototype, 'stopImmediatePropagation', {
-        value: observed, configurable: true, writable: true,
-      });
-      observers = scope[key] = new Set();
+      // Old listeners can cache the native stop method and read either state getter.
+      // Observe the event in flight without requesting, copying or replacing page state.
+      const watchStateRead = (owner: object | undefined, activeEvent: (receiver: unknown) => Event | undefined) => {
+        if (!owner) return;
+        const state = Object.getOwnPropertyDescriptor(owner, 'state');
+        if (!state?.configurable || !state.get) return;
+        const getState = state.get;
+        function observedState(this: unknown) {
+          const value = getState.call(this);
+          observe(activeEvent(this));
+          return value;
+        }
+        Object.defineProperty(owner, 'state', { ...state, get: observedState });
+        restorers.push(() => {
+          if (Object.getOwnPropertyDescriptor(owner, 'state')?.get === observedState) {
+            Object.defineProperty(owner, 'state', state);
+          }
+        });
+      };
+      watchStateRead(PopState.prototype, event => event as PopStateEvent);
+      watchStateRead(window.History?.prototype, history => history === window.history ? window.event : undefined);
+      if (!restorers.length) return resolve(false);
+      observation = scope[key] = { observers, restore: () => { for (const restore of restorers) restore(); } };
     }
-    const registeredMethod = prototype.stopImmediatePropagation;
+    const { observers, restore } = observation;
     const finish = (seen: boolean) => {
       clearTimeout(timer);
       window.removeEventListener(stopEvent, stop, true);
       observers.delete(notify);
-      if (observers.size === 0 && scope[key] === observers) {
-        if (prototype.stopImmediatePropagation === registeredMethod) Reflect.deleteProperty(prototype, 'stopImmediatePropagation');
+      if (observers.size === 0 && scope[key] === observation) {
+        restore();
         delete scope[key];
       }
       resolve(seen);
