@@ -21,6 +21,7 @@ import {
   PageUnresponsiveError,
   pendingDialogHint,
   runCdpInputWithDialogs,
+  withBackgroundClickFocus,
   type CdpInputResult,
 } from '@/utils/cdp-input';
 import { parseDialogResponse } from '@/utils/dialog-tracker';
@@ -243,7 +244,10 @@ class ComputerTool extends BaseBrowserToolExecutor {
       }
 
       // Execute the action and capture frame on success
-      const result = await this.executeAction(params, tab);
+      const execute = () => this.executeAction(params, tab);
+      const backgroundMultiClick = params.background === true && tab.active === false &&
+        (params.action === 'double_click' || params.action === 'triple_click');
+      const result = backgroundMultiClick ? await withBackgroundClickFocus(tab.id, execute) : await execute();
 
       // Trigger auto-capture on successful actions (except screenshot which is read-only)
       if (

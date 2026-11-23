@@ -10,6 +10,7 @@
 
 const tabQueueTails = new Map<number, Promise<void>>();
 const requestQueueTails = new Map<number, Promise<void>>();
+const backgroundFocusTails = new Map<number, Promise<void>>();
 const nativeMouseTails = new Map<number, Promise<void>>();
 const nativeKeyTails = new Map<number, Promise<void>>();
 
@@ -77,6 +78,11 @@ export function runInTabRequestQueue<T>(tabId: number, task: () => Promise<T>, o
   return runInQueue(requestQueueTails, tabId, task, options);
 }
 
+/** Keep a later focus override behind restoration of the previous override. */
+export function runInBackgroundFocusQueue<T>(tabId: number, task: () => Promise<T>, signal?: AbortSignal) {
+  return runInQueue(backgroundFocusTails, tabId, task, { waitSignal: signal });
+}
+
 /** A later press must not overtake the previous press's compensating release. */
 export function runInNativeMouseQueue<T>(tabId: number, task: () => Promise<T>, signal: AbortSignal) {
   return runInQueue(nativeMouseTails, tabId, task, { waitSignal: signal });
@@ -93,6 +99,7 @@ export function clearTabQueue(tabId: number): void {
   }
   tabQueueTails.delete(tabId);
   requestQueueTails.delete(tabId);
+  backgroundFocusTails.delete(tabId);
   nativeMouseTails.delete(tabId);
   nativeKeyTails.delete(tabId);
 }

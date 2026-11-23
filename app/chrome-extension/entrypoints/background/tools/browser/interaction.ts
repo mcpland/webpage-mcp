@@ -16,6 +16,7 @@ import {
   pendingDialogHint,
   runCdpInputWithDialogs,
   withTimeout,
+  withBackgroundClickFocus,
   type CdpInputResult,
   type DialogOutcome,
 } from '@/utils/cdp-input';
@@ -406,24 +407,9 @@ class ClickTool extends BaseBrowserToolExecutor {
     args: ClickToolParams,
     context?: { signal?: AbortSignal; deadlineAt?: number },
   ): Promise<ToolResult> {
-    const {
-      selector,
-      selectorType = 'css',
-      coordinates,
-      waitForNavigation = false,
-      timeout = TIMEOUTS.DEFAULT_WAIT * 5,
-      frameId,
-      button,
-      bubbles,
-      cancelable,
-      modifiers,
-    } = args;
-
-
-    if (!selector && !coordinates && !args.ref) {
+    if (!args.selector && !args.coordinates && !args.ref) {
       return createErrorResponse(
-        ERROR_MESSAGES.INVALID_PARAMETERS +
-          ': Provide ref or selector or coordinates',
+        ERROR_MESSAGES.INVALID_PARAMETERS + ': Provide ref or selector or coordinates',
       );
     }
     const dialogResponse = parseDialogResponse(args.dialog);
@@ -438,20 +424,9 @@ class ClickTool extends BaseBrowserToolExecutor {
         `${ERROR_MESSAGES.INVALID_PARAMETERS}: ${downloadWait.message}`,
       );
     }
-    // Armed right before the click so the download it triggers is caught
-    // without racing a separate chrome_handle_download call.
-    const downloadAbort = new AbortController();
-    const onCallerAbort = () => downloadAbort.abort();
-    if (context?.signal) {
-      if (context.signal.aborted) downloadAbort.abort();
-      else context.signal.addEventListener('abort', onCallerAbort, { once: true });
-    }
-
     try {
-      const deadline = context?.deadlineAt;
       const signal = inputSignal(context);
       signal?.throwIfAborted();
-      // Resolve tab
       const explicit = await this.getRequestedTab(args.tabId);
       let tab =
         explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
@@ -475,7 +450,40 @@ class ClickTool extends BaseBrowserToolExecutor {
         );
       }
 
-      const beforeUrl = String(tab.url || '');
+      const click = () => this.clickInTab(targetTabId, tab.url || '', args, dialogResponse, downloadWait, context);
+      return args.background === true && tab.active === false
+        ? await withBackgroundClickFocus(targetTabId, click, signal)
+        : await click();
+    } catch (error) {
+      console.error('Error in click operation:', error);
+      return createErrorResponse(
+        `Error performing click: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async clickInTab(
+    targetTabId: number,
+    beforeUrl: string,
+    args: ClickToolParams,
+    dialogResponse: DialogResponse | undefined,
+    downloadWait: { timeoutMs: number; filenameContains?: string } | undefined,
+    context?: BrowserInputContext,
+  ): Promise<ToolResult> {
+    const { waitForNavigation = false, timeout = TIMEOUTS.DEFAULT_WAIT * 5, button, modifiers } = args;
+    // Armed right before the click so the download it triggers is caught
+    // without racing a separate chrome_handle_download call.
+    const downloadAbort = new AbortController();
+    const onCallerAbort = () => downloadAbort.abort();
+    if (context?.signal) {
+      if (context.signal.aborted) downloadAbort.abort();
+      else context.signal.addEventListener('abort', onCallerAbort, { once: true });
+    }
+
+    try {
+      const deadline = context?.deadlineAt;
+      const signal = inputSignal(context);
+      signal?.throwIfAborted();
       const resolvedTarget = await this.resolveTarget(targetTabId, args);
       signal?.throwIfAborted();
       let navigationOccurred = false;
@@ -625,11 +633,6 @@ class ClickTool extends BaseBrowserToolExecutor {
         ],
         isError: false,
       };
-    } catch (error) {
-      console.error('Error in click operation:', error);
-      return createErrorResponse(
-        `Error performing click: ${error instanceof Error ? error.message : String(error)}`,
-      );
     } finally {
       // Release the download listener on every exit path (a no-op once settled).
       context?.signal?.removeEventListener('abort', onCallerAbort);

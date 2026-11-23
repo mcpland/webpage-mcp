@@ -1,3 +1,4 @@
+import { runInBackgroundFocusQueue } from '@/entrypoints/background/tab-queue';
 import { cdpSessionManager } from './cdp-session-manager';
 import {
   describeDialog,
@@ -112,6 +113,43 @@ export async function sendTimedDialogCommand(
     if (onExternalAbort) externalSignal?.removeEventListener('abort', onExternalAbort);
     controller.abort();
   }
+}
+
+/** Hidden Chrome tabs can acknowledge native mouse input without delivering it.
+ * Emulate renderer focus before measuring the target, without activating the tab.
+ */
+export async function withBackgroundClickFocus<T>(
+  tabId: number,
+  click: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  return runInBackgroundFocusQueue(tabId, async () => {
+    try {
+      await cdpSessionManager.attach(tabId, 'background-click');
+    } catch {
+      // The click tool can still use its element-based fallback without a debugger.
+      signal?.throwIfAborted();
+      return click();
+    }
+    try {
+      await sendTimedDialogCommand(tabId, 'Emulation.setFocusEmulationEnabled',
+        { enabled: true }, PAGE_ENABLE_TIMEOUT_MS, 'Enable background focus', signal);
+      signal?.throwIfAborted();
+      return await click();
+    } finally {
+      // Other tools may still hold debugger leases; detaching only our lease
+      // does not necessarily clear emulation. Cleanup also runs after cancellation.
+      try {
+        await sendTimedDialogCommand(tabId, 'Emulation.setFocusEmulationEnabled',
+          { enabled: false }, PAGE_ENABLE_TIMEOUT_MS, 'Restore background focus');
+      } catch (error) {
+        // A click may have closed the tab. Keep its outcome so callers don't replay it.
+        console.warn('Could not restore background focus on tab', tabId, error);
+      } finally {
+        await cdpSessionManager.detach(tabId, 'background-click');
+      }
+    }
+  }, signal);
 }
 
 /** True when the page's main thread still answers the debugger. */

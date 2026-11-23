@@ -19,6 +19,7 @@ import {
   CdpUnavailableError,
   PageUnresponsiveError,
   runCdpInputWithDialogs,
+  withBackgroundClickFocus,
 } from '@/utils/cdp-input';
 import { dialogTracker, parseDialogResponse } from '@/utils/dialog-tracker';
 
@@ -53,6 +54,28 @@ describe('runCdpInputWithDialogs', () => {
     expect(dispatch).toHaveBeenCalledOnce();
     expect(mocks.attach).toHaveBeenCalledWith(7, 'click');
     expect(mocks.detach).toHaveBeenCalledWith(7, 'click');
+  });
+
+  it('restores background focus after failed input before a second click can start', async () => {
+    const events: string[] = [];
+    mocks.sendCommand.mockImplementation(async (_tabId, method, params) => {
+      expect(method).toBe('Emulation.setFocusEmulationEnabled');
+      events.push(params.enabled ? 'enable' : 'restore');
+    });
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    const first = withBackgroundClickFocus(7, async () => {
+      events.push('first');
+      await barrier;
+      throw new Error('input cancelled');
+    });
+    const second = withBackgroundClickFocus(7, async () => { events.push('second'); });
+    await vi.waitFor(() => expect(events).toEqual(['enable', 'first']));
+    release();
+    await expect(first).rejects.toThrow('input cancelled');
+    await second;
+    expect(events).toEqual(['enable', 'first', 'restore', 'enable', 'second', 'restore']);
+    expect(mocks.detach).toHaveBeenCalledTimes(2);
   });
 
   it('returns as soon as the input opens a dialog instead of waiting on the blocked page', async () => {
