@@ -1136,7 +1136,7 @@ describe('navigateTool', () => {
       });
       await vi.advanceTimersByTimeAsync(500);
       expect((await pending).isError).toBe(false);
-      expect(executeScript).toHaveBeenCalledTimes(3);
+      expect(executeScript).toHaveBeenCalledTimes(4);
     } finally {
       history.mockRestore();
       vi.useRealTimers();
@@ -1188,6 +1188,32 @@ describe('navigateTool', () => {
     } finally {
       history.mockRestore();
       vi.useRealTimers();
+    }
+  });
+
+  it.each(['before', 'after'])('retains a slow %s read from the traversing frame while a sibling is stalled', async (slow) => {
+    const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockRejectedValue(new Error('Debugger in use'));
+    const event = { addListener: vi.fn(), removeListener: vi.fn() };
+    let traversed = false;
+    const executeScript = vi.fn(async ({ args, target }) => {
+      const frameId = target.frameIds[0];
+      if (frameId === 7) return new Promise(() => {});
+      const before = args[0] !== 'current';
+      if (before === (slow === 'before')) await new Promise(resolve => setTimeout(resolve, 420));
+      return [{ frameId, result: [before || traversed ? 'destination' : 'start'] }];
+    });
+    Object.assign(chrome, { scripting: { executeScript }, webNavigation: {
+      onHistoryStateUpdated: event, getAllFrames: async () => [{ frameId: 7 }, { frameId: 9 }],
+    } });
+    mocks.tabsGoBack.mockImplementation(async () => {
+      traversed = true;
+      event.addListener.mock.calls[0][0]({ tabId: makeTab().id, frameId: 9 });
+    });
+    try {
+      expect((await navigateTool.execute({ url: 'back', waitUntil: 'commit' })).isError).toBe(false);
+      expect(executeScript.mock.calls.filter(([call]) => call.args[0] === 'current')).toHaveLength(1);
+    } finally {
+      history.mockRestore();
     }
   });
 

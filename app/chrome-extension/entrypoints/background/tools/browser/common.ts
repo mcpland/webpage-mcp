@@ -35,12 +35,11 @@ function readTabHistory(tabId: number, signal: AbortSignal): Promise<TabHistory 
 
 type FrameHistoryRead = 'back' | 'forward' | 'current';
 
-async function readFrameHistory(tabId: number, direction: FrameHistoryRead, signal: AbortSignal) {
+async function readFrameHistory(tabId: number, frameId: number, direction: FrameHistoryRead, signal: AbortSignal) {
   // Navigation API keys are scoped to a frame and survive same-document traversal.
   // An isolated world can read them while another client owns the debugger.
-  const readSignal = AbortSignal.any([signal, AbortSignal.timeout(FRAME_HISTORY_READ_TIMEOUT_MS)]);
   return readWithSignal(() => chrome.scripting.executeScript({
-    target: { tabId, allFrames: true }, world: 'ISOLATED', injectImmediately: true,
+    target: { tabId, frameIds: [frameId] }, world: 'ISOLATED', injectImmediately: true,
     args: [direction],
     func: (direction: FrameHistoryRead): string[] | number => {
       if (window === window.top) return [];
@@ -64,10 +63,7 @@ async function readFrameHistory(tabId: number, direction: FrameHistoryRead, sign
       return nav.entries().filter((entry) => direction === 'back'
         ? entry.index < current.index : entry.index > current.index).map((entry) => entry.key);
     },
-  }), readSignal).catch(() => {
-    signal.throwIfAborted();
-    return [];
-  });
+  }), signal).then(entries => entries.find(entry => entry.frameId === frameId)).catch(() => undefined);
 }
 
 interface NavigateToolParams {
@@ -281,25 +277,25 @@ class NavigateTool extends BaseBrowserToolExecutor {
     const frames = navigation?.getAllFrames
       ? await readWithSignal(() => navigation.getAllFrames({ tabId }).catch(() => null), signal)
       : null;
-    const hasChildren = frames?.some((frame) => frame.frameId !== 0);
-    // The debugger can change owners between the two observations. Capture both
-    // baselines before traversal so frame-local keys remain usable after a handoff.
-    const [before, frameEntries] = hasChildren ? await Promise.all([
+    const frameReads = new AbortController();
+    const frameSignal = AbortSignal.any([frameReads.signal, signal]);
+    const baselines = new Map((frames ?? []).filter(frame => frame.frameId !== 0).map(({ frameId }) =>
+      [frameId, readFrameHistory(tabId, frameId, direction, frameSignal)] as const));
+    // Give the renderer a head start without holding a top-level traversal behind
+    // a dialog. Keep each outstanding read for a later event from that frame.
+    const [before] = baselines.size ? await Promise.all([
       readTabHistory(tabId, signal),
-      readFrameHistory(tabId, direction, signal),
-    ]) : [undefined, []] as const;
-    const frameDestinations = new Map<number, Set<string>>();
-    const opaqueTraversals = new Map<string, number>();
-    for (const { frameId, documentId, result } of frameEntries) {
-      if (typeof result === 'number') {
-        if (documentId) opaqueTraversals.set(documentId, result);
-      } else if (result?.length) frameDestinations.set(frameId, new Set(result));
-    }
+      readWithSignal(() => Promise.all(baselines.values()), AbortSignal.any([
+        signal, AbortSignal.timeout(FRAME_HISTORY_READ_TIMEOUT_MS),
+      ])).catch(() => undefined),
+    ]) : [];
     const destinations = before && new Set((direction === 'back'
       ? before.entries.slice(0, before.currentIndex)
       : before.entries.slice(before.currentIndex + 1)).map((entry) => entry.id));
     let committedUrl: string | undefined;
-    const traversingOpaqueDocuments = new Set<string>();
+    const updatedFrames = new Set<number>();
+    const readingFrames = new Set<number>();
+    const traversingDocuments = new Set<string>();
     let childUpdated = false;
     let childTraversed = false;
     const onCommit = (details: chrome.webNavigation.WebNavigationTransitionCallbackDetails) => {
@@ -307,10 +303,31 @@ class NavigateTool extends BaseBrowserToolExecutor {
       if (details.frameId === 0) committedUrl = details.url;
       else {
         childUpdated = true;
-        if (details.transitionType === 'auto_subframe' && details.documentId && opaqueTraversals.has(details.documentId)) {
-          traversingOpaqueDocuments.add(details.documentId);
+        updatedFrames.add(details.frameId);
+        if (details.transitionType === 'auto_subframe' && details.documentId) {
+          traversingDocuments.add(details.documentId);
         }
         if (details.transitionQualifiers?.includes('forward_back')) childTraversed = true;
+      }
+    };
+    const checkUpdatedFrames = () => {
+      for (const frameId of updatedFrames) {
+        if (readingFrames.has(frameId)) continue;
+        updatedFrames.delete(frameId);
+        const baseline = baselines.get(frameId);
+        if (!baseline) continue;
+        readingFrames.add(frameId);
+        void Promise.all([baseline, readFrameHistory(tabId, frameId, 'current', frameSignal)])
+          .then(([previous, current]) => {
+            const entry = current?.result;
+            if (Array.isArray(entry) && Array.isArray(previous?.result)) {
+              if (previous.result.includes(entry[0])) childTraversed = true;
+            } else if (typeof entry === 'number' && typeof previous?.result === 'number' &&
+              current?.documentId && current.documentId === previous.documentId && traversingDocuments.has(current.documentId)) {
+              if (entry > previous.result) childTraversed = true;
+              else updatedFrames.add(frameId); // popstate may follow the browser event.
+            }
+          }).finally(() => readingFrames.delete(frameId));
       }
     };
     const events = [navigation?.onCommitted, navigation?.onHistoryStateUpdated, navigation?.onReferenceFragmentUpdated];
@@ -326,22 +343,15 @@ class NavigateTool extends BaseBrowserToolExecutor {
         // Chrome can report a child traversing pushState entries without a forward_back
         // qualifier. Confirm it reached an existing joint session-history entry.
         const topTraversed = current.url && (current.url !== previousUrl || current.url === committedUrl);
-        if (!topTraversed && (childUpdated || traversingOpaqueDocuments.size) && !childTraversed) {
+        if (!topTraversed && (childUpdated || updatedFrames.size) && !childTraversed) {
           const history = childUpdated && destinations?.size ? await readTabHistory(tabId, signal) : undefined;
           childUpdated = false;
           if (history && destinations) {
+            updatedFrames.clear();
             const entry = history.entries[history.currentIndex];
             childTraversed = entry !== undefined && destinations.has(entry.id);
-          } else if (frameDestinations.size || traversingOpaqueDocuments.size) {
-            const currentEntries = await readFrameHistory(tabId, 'current', signal);
-            childTraversed = currentEntries.some(({ frameId, documentId, result }) => {
-              if (typeof result === 'number') {
-                const before = opaqueTraversals.get(documentId);
-                return traversingOpaqueDocuments.has(documentId) && before !== undefined && result > before;
-              }
-              const key = result?.[0];
-              return key !== undefined && frameDestinations.get(frameId)?.has(key);
-            });
+          } else {
+            checkUpdatedFrames();
           }
         }
         if (topTraversed || (current.url && childTraversed)) {
@@ -354,6 +364,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         await this.sleep(NAVIGATION_POLL_MS);
       }
     } finally {
+      frameReads.abort();
       for (const event of events) event?.removeListener(onCommit);
     }
   }
