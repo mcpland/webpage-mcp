@@ -37,6 +37,7 @@ export { sleep };
 
 /** Create the isolated directories, keyed extension and native host registration. */
 export function prepareEnvironment({
+  serverDir = path.join(REPO_ROOT, "app/mcp-server"),
   extensionDir = path.join(
     REPO_ROOT,
     "app/chrome-extension/.output/chrome-mv3",
@@ -44,8 +45,8 @@ export function prepareEnvironment({
 } = {}) {
   const required = [
     path.join(extensionDir, "manifest.json"),
-    path.join(REPO_ROOT, "app/mcp-server/dist/index.js"),
-    path.join(REPO_ROOT, "app/mcp-server/dist/mcp/mcp-server-stdio.js"),
+    path.join(serverDir, "dist/index.js"),
+    path.join(serverDir, "dist/mcp/mcp-server-stdio.js"),
   ];
   for (const file of required) {
     if (!fs.existsSync(file)) {
@@ -92,7 +93,7 @@ export function prepareEnvironment({
       `export HOME=${quote(dirs.home)}`,
       `export WEBPAGE_MCP_NATIVE_SOCKET=${quote(SOCKET_NAME)}`,
       `export WEBPAGE_MCP_NATIVE_AUTH_DIR=${quote(dirs.auth)}`,
-      `exec ${quote(process.execPath)} ${quote(path.join(REPO_ROOT, "app/mcp-server/dist/index.js"))} "$@" 2>>${quote(dirs.nativeHostLog)}`,
+      `exec ${quote(process.execPath)} ${quote(path.join(serverDir, "dist/index.js"))} "$@" 2>>${quote(dirs.nativeHostLog)}`,
       "",
     ].join("\n"),
     { mode: 0o755 },
@@ -116,7 +117,7 @@ export function prepareEnvironment({
     ),
   );
 
-  return { ...dirs, extensionId };
+  return { ...dirs, extensionId, serverDir };
 }
 
 export async function launchChrome(env, { chromeBinary, headless = true }) {
@@ -304,9 +305,15 @@ export async function connectNativeHost(port, extensionId) {
 
 /** Start an MCP stdio server bridged to the isolated native host. */
 export async function connectMcpClient(env, extraEnv = {}) {
+  return connectStdioClient(env, [
+    path.join(env.serverDir, "dist/mcp/mcp-server-stdio.js"),
+  ], extraEnv);
+}
+
+export async function connectStdioClient(env, args, extraEnv = {}) {
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [path.join(REPO_ROOT, "app/mcp-server/dist/mcp/mcp-server-stdio.js")],
+    args,
     cwd: env.run,
     env: {
       ...process.env,

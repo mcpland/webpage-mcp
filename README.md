@@ -579,6 +579,10 @@ WEBPAGE_MCP_CHROME_BINARY=/path/to/chrome-for-testing pnpm test:e2e:browser
 # A subset, with the browser visible: ... pnpm test:e2e:browser dialogs iframe-refs --headful
 ```
 
+To compare control of **already-open Chrome tabs**, run `pnpm bench:existing-chrome` with the
+same Chrome for Testing binary. The [benchmark guide and 0.11.0 results](docs/benchmarks/existing-chrome.md)
+cover released artifacts, the Chrome DevTools MCP adapter, the independent page checks and per-task metrics.
+
 ### Linting & Formatting
 
 ```bash

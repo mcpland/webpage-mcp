@@ -1,0 +1,2680 @@
+{
+  "schemaVersion": 1,
+  "started": "2026-11-23T17:44:49.147Z",
+  "host": "darwin arm64 27.0.0",
+  "node": "v24.16.0",
+  "headful": true,
+  "repeat": 5,
+  "selected": [
+    "same-title",
+    "never-active-tab",
+    "mid-read-switch",
+    "cross-origin-frame",
+    "action-network-json",
+    "action-network-html",
+    "action-network-html-detailed",
+    "cancel-press",
+    "bookmark-portals",
+    "bookmark-short-name",
+    "closed-target"
+  ],
+  "versions": {
+    "extension": "0.11.0",
+    "webpage": "0.11.0",
+    "devtools": "1.13.0",
+    "chrome": "Chrome/153.0.8010.12"
+  },
+  "sha256": {
+    "extensionWorker": "1ded721fc2fa9b7d61dafba1cb6419748f47661eccb1f079568e1cd529d77d2b",
+    "nativeHost": "151bfff8d96d50ff3388fb72fd91d66731cabd4bf1c33ea2ecd059856769f552",
+    "stdio": "7e3370ff622f6efa0bc519dc73d41454cd0231607c58e9875ab4b37c6d6d8061"
+  },
+  "trials": [
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "same-title",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 5351
+        }
+      ],
+      "ms": 5356,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a mark"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "never-active-tab",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 5
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 5366
+        }
+      ],
+      "reason": "page did not report /b mark",
+      "ms": 10435,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "mid-read-switch",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 7
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 145
+        }
+      ],
+      "ms": 153,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "cross-origin-frame",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_read_page",
+          "ms": 11
+        },
+        {
+          "tool": "chrome_read_page",
+          "ms": 15
+        },
+        {
+          "tool": "chrome_fill_or_select",
+          "ms": 848
+        }
+      ],
+      "ms": 878,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/child input", "/child input"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "action-network-json",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 9
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 226
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 8
+        }
+      ],
+      "ms": 248,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "action-network-html",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 7
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 218
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 4
+        }
+      ],
+      "reason": "MCP capture omitted the observed html HTTP 503 request (1 requests returned)",
+      "ms": 233,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "action-network-html-detailed",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 5
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 226
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 7
+        }
+      ],
+      "ms": 242,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "cancel-press",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 303
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 236
+        }
+      ],
+      "ms": 1945,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": [
+        "/cancel-captured-press pressed",
+        "/cancel-captured-press cancelled",
+        "/cancel-captured-press next"
+      ]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "bookmark-portals",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "chrome_bookmark_search",
+          "ms": 3
+        },
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 1
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 11
+        }
+      ],
+      "ms": 19,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "bookmark-short-name",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "chrome_bookmark_search",
+          "ms": 2
+        }
+      ],
+      "reason": "chrome_bookmark_search: Specified bookmark folder was not found.",
+      "ms": 2,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 1,
+      "task": "closed-target",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 187
+        }
+      ],
+      "reason": "Missing expected rejection (ToolError): a click on a closed target must report an MCP error",
+      "ms": 199,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 1,
+      "pageEvents": ["/guard mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "same-title",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 53
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 59
+        },
+        {
+          "tool": "click",
+          "ms": 365
+        }
+      ],
+      "ms": 477,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "never-active-tab",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 4
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 36
+        },
+        {
+          "tool": "click",
+          "ms": 311
+        }
+      ],
+      "ms": 352,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/b mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "mid-read-switch",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 3
+        },
+        {
+          "tool": "evaluate_script",
+          "ms": 247
+        }
+      ],
+      "ms": 250,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "cross-origin-frame",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 5
+        },
+        {
+          "tool": "fill",
+          "ms": 4
+        }
+      ],
+      "reason": "fill: Error: Failed to interact with the element with uid 1_0. el.getAttribute is not a function",
+      "ms": 12,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "action-network-json",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 1
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 3
+        },
+        {
+          "tool": "click",
+          "ms": 244
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 3
+        }
+      ],
+      "ms": 252,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "action-network-html",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 4
+        },
+        {
+          "tool": "click",
+          "ms": 235
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 1
+        }
+      ],
+      "ms": 241,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "action-network-html-detailed",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 6
+        },
+        {
+          "tool": "click",
+          "ms": 242
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 2
+        }
+      ],
+      "ms": 252,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "cancel-press",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 12
+        },
+        {
+          "tool": "click",
+          "ms": 89
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 9
+        },
+        {
+          "tool": "click",
+          "ms": 243
+        }
+      ],
+      "reason": "post-cancel page state: {\"dragging\":false,\"committed\":33.04296875,\"activations\":0}\n+ actual - expected\n\n  {\n    activations: 0,\n+   committed: 33.04296875,\n-   committed: null,\n    dragging: false\n  }\n",
+      "ms": 1758,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": [
+        "/cancel-captured-press pressed",
+        "/cancel-captured-press next"
+      ]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "bookmark-portals",
+      "status": "unsupported",
+      "calls": [],
+      "reason": "No bookmark-folder tool in the Chrome DevTools MCP catalog",
+      "ms": 0,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "bookmark-short-name",
+      "status": "unsupported",
+      "calls": [],
+      "reason": "No bookmark-folder tool in the Chrome DevTools MCP catalog",
+      "ms": 0,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 1,
+      "task": "closed-target",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 3
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 45
+        },
+        {
+          "tool": "click",
+          "ms": 3
+        }
+      ],
+      "ms": 60,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "same-title",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 5353
+        }
+      ],
+      "ms": 5356,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a mark"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "never-active-tab",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 5363
+        }
+      ],
+      "reason": "page did not report /b mark",
+      "ms": 10428,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "mid-read-switch",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 7
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 133
+        }
+      ],
+      "ms": 140,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "cross-origin-frame",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_read_page",
+          "ms": 27
+        },
+        {
+          "tool": "chrome_read_page",
+          "ms": 22
+        },
+        {
+          "tool": "chrome_fill_or_select",
+          "ms": 410
+        }
+      ],
+      "ms": 462,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/child input", "/child input"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "action-network-json",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 227
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 6
+        }
+      ],
+      "ms": 241,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "action-network-html",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 239
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 5
+        }
+      ],
+      "reason": "MCP capture omitted the observed html HTTP 503 request (1 requests returned)",
+      "ms": 250,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "action-network-html-detailed",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 5
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 218
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 5
+        }
+      ],
+      "ms": 232,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "cancel-press",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 101
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 237
+        }
+      ],
+      "ms": 1741,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": [
+        "/cancel-captured-press pressed",
+        "/cancel-captured-press cancelled",
+        "/cancel-captured-press next"
+      ]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "bookmark-portals",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "chrome_bookmark_search",
+          "ms": 5
+        },
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 9
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 16
+        }
+      ],
+      "ms": 32,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "bookmark-short-name",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "chrome_bookmark_search",
+          "ms": 3
+        }
+      ],
+      "reason": "chrome_bookmark_search: Specified bookmark folder was not found.",
+      "ms": 3,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 2,
+      "task": "closed-target",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 193
+        }
+      ],
+      "reason": "Missing expected rejection (ToolError): a click on a closed target must report an MCP error",
+      "ms": 204,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 1,
+      "pageEvents": ["/guard mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "same-title",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 51
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 52
+        },
+        {
+          "tool": "click",
+          "ms": 303
+        }
+      ],
+      "ms": 406,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "never-active-tab",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 4
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 42
+        },
+        {
+          "tool": "click",
+          "ms": 300
+        }
+      ],
+      "ms": 346,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/b mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "mid-read-switch",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 3
+        },
+        {
+          "tool": "evaluate_script",
+          "ms": 247
+        }
+      ],
+      "ms": 251,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "cross-origin-frame",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 6
+        },
+        {
+          "tool": "fill",
+          "ms": 4
+        }
+      ],
+      "reason": "fill: Error: Failed to interact with the element with uid 1_0. el.getAttribute is not a function",
+      "ms": 12,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "action-network-json",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 4
+        },
+        {
+          "tool": "click",
+          "ms": 244
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 2
+        }
+      ],
+      "ms": 252,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "action-network-html",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 4
+        },
+        {
+          "tool": "click",
+          "ms": 239
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 2
+        }
+      ],
+      "ms": 247,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "action-network-html-detailed",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 3
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 7
+        },
+        {
+          "tool": "click",
+          "ms": 254
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 2
+        }
+      ],
+      "ms": 267,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "cancel-press",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 3
+        },
+        {
+          "tool": "click",
+          "ms": 98
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 9
+        },
+        {
+          "tool": "click",
+          "ms": 256
+        }
+      ],
+      "reason": "post-cancel page state: {\"dragging\":false,\"committed\":33.04296875,\"activations\":0}\n+ actual - expected\n\n  {\n    activations: 0,\n+   committed: 33.04296875,\n-   committed: null,\n    dragging: false\n  }\n",
+      "ms": 1769,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": [
+        "/cancel-captured-press pressed",
+        "/cancel-captured-press next"
+      ]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "bookmark-portals",
+      "status": "unsupported",
+      "calls": [],
+      "reason": "No bookmark-folder tool in the Chrome DevTools MCP catalog",
+      "ms": 0,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "bookmark-short-name",
+      "status": "unsupported",
+      "calls": [],
+      "reason": "No bookmark-folder tool in the Chrome DevTools MCP catalog",
+      "ms": 0,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 2,
+      "task": "closed-target",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 4
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 53
+        },
+        {
+          "tool": "click",
+          "ms": 1
+        }
+      ],
+      "ms": 69,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "same-title",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 5353
+        }
+      ],
+      "ms": 5356,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a mark"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "never-active-tab",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 5
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 5342
+        }
+      ],
+      "reason": "page did not report /b mark",
+      "ms": 10407,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "mid-read-switch",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 6
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 139
+        }
+      ],
+      "ms": 145,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "cross-origin-frame",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_read_page",
+          "ms": 15
+        },
+        {
+          "tool": "chrome_read_page",
+          "ms": 20
+        },
+        {
+          "tool": "chrome_fill_or_select",
+          "ms": 754
+        }
+      ],
+      "ms": 792,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/child input", "/child input"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "action-network-json",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 229
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 6
+        }
+      ],
+      "ms": 240,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "action-network-html",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 222
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 2
+        }
+      ],
+      "reason": "MCP capture omitted the observed html HTTP 503 request (1 requests returned)",
+      "ms": 231,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "action-network-html-detailed",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 215
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 6
+        }
+      ],
+      "ms": 227,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "cancel-press",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 101
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 226
+        }
+      ],
+      "ms": 1730,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": [
+        "/cancel-captured-press pressed",
+        "/cancel-captured-press cancelled",
+        "/cancel-captured-press next"
+      ]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "bookmark-portals",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "chrome_bookmark_search",
+          "ms": 4
+        },
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 1
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 7
+        }
+      ],
+      "ms": 17,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "bookmark-short-name",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "chrome_bookmark_search",
+          "ms": 2
+        }
+      ],
+      "reason": "chrome_bookmark_search: Specified bookmark folder was not found.",
+      "ms": 2,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 3,
+      "task": "closed-target",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 187
+        }
+      ],
+      "reason": "Missing expected rejection (ToolError): a click on a closed target must report an MCP error",
+      "ms": 199,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 1,
+      "pageEvents": ["/guard mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "same-title",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 47
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 82
+        },
+        {
+          "tool": "click",
+          "ms": 321
+        }
+      ],
+      "ms": 449,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "never-active-tab",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 4
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 37
+        },
+        {
+          "tool": "click",
+          "ms": 305
+        }
+      ],
+      "ms": 346,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/b mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "mid-read-switch",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "evaluate_script",
+          "ms": 226
+        }
+      ],
+      "ms": 227,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "cross-origin-frame",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 6
+        },
+        {
+          "tool": "fill",
+          "ms": 5
+        }
+      ],
+      "reason": "fill: Error: Failed to interact with the element with uid 1_0. el.getAttribute is not a function",
+      "ms": 13,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "action-network-json",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 4
+        },
+        {
+          "tool": "click",
+          "ms": 246
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 3
+        }
+      ],
+      "ms": 256,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "action-network-html",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 3
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 7
+        },
+        {
+          "tool": "click",
+          "ms": 252
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 2
+        }
+      ],
+      "ms": 265,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "action-network-html-detailed",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 3
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 7
+        },
+        {
+          "tool": "click",
+          "ms": 248
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 2
+        }
+      ],
+      "ms": 260,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "cancel-press",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 11
+        },
+        {
+          "tool": "click",
+          "ms": 89
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 8
+        },
+        {
+          "tool": "click",
+          "ms": 255
+        }
+      ],
+      "reason": "post-cancel page state: {\"dragging\":false,\"committed\":33.04296875,\"activations\":0}\n+ actual - expected\n\n  {\n    activations: 0,\n+   committed: 33.04296875,\n-   committed: null,\n    dragging: false\n  }\n",
+      "ms": 1767,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": [
+        "/cancel-captured-press pressed",
+        "/cancel-captured-press next"
+      ]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "bookmark-portals",
+      "status": "unsupported",
+      "calls": [],
+      "reason": "No bookmark-folder tool in the Chrome DevTools MCP catalog",
+      "ms": 0,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "bookmark-short-name",
+      "status": "unsupported",
+      "calls": [],
+      "reason": "No bookmark-folder tool in the Chrome DevTools MCP catalog",
+      "ms": 0,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 3,
+      "task": "closed-target",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 4
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 15
+        },
+        {
+          "tool": "click",
+          "ms": 3
+        }
+      ],
+      "ms": 32,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "same-title",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 5344
+        }
+      ],
+      "ms": 5348,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a mark"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "never-active-tab",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 5353
+        }
+      ],
+      "reason": "page did not report /b mark",
+      "ms": 10410,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "mid-read-switch",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 6
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 136
+        }
+      ],
+      "ms": 142,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "cross-origin-frame",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_read_page",
+          "ms": 27
+        },
+        {
+          "tool": "chrome_read_page",
+          "ms": 30
+        },
+        {
+          "tool": "chrome_fill_or_select",
+          "ms": 677
+        }
+      ],
+      "ms": 737,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/child input", "/child input"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "action-network-json",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 5
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 233
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 6
+        }
+      ],
+      "ms": 248,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "action-network-html",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 235
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 8
+        }
+      ],
+      "reason": "MCP capture omitted the observed html HTTP 503 request (1 requests returned)",
+      "ms": 250,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "action-network-html-detailed",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 221
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 6
+        }
+      ],
+      "ms": 232,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "cancel-press",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 101
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 228
+        }
+      ],
+      "ms": 1733,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": [
+        "/cancel-captured-press pressed",
+        "/cancel-captured-press cancelled",
+        "/cancel-captured-press next"
+      ]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "bookmark-portals",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "chrome_bookmark_search",
+          "ms": 4
+        },
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 1
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 5
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 11
+        }
+      ],
+      "ms": 22,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "bookmark-short-name",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "chrome_bookmark_search",
+          "ms": 3
+        }
+      ],
+      "reason": "chrome_bookmark_search: Specified bookmark folder was not found.",
+      "ms": 3,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 4,
+      "task": "closed-target",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 186
+        }
+      ],
+      "reason": "Missing expected rejection (ToolError): a click on a closed target must report an MCP error",
+      "ms": 197,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 1,
+      "pageEvents": ["/guard mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "same-title",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 52
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 75
+        },
+        {
+          "tool": "click",
+          "ms": 315
+        }
+      ],
+      "ms": 443,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "never-active-tab",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 28
+        },
+        {
+          "tool": "click",
+          "ms": 326
+        }
+      ],
+      "ms": 356,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/b mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "mid-read-switch",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 3
+        },
+        {
+          "tool": "evaluate_script",
+          "ms": 222
+        }
+      ],
+      "ms": 225,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "cross-origin-frame",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 5
+        },
+        {
+          "tool": "fill",
+          "ms": 4
+        }
+      ],
+      "reason": "fill: Error: Failed to interact with the element with uid 1_0. el.getAttribute is not a function",
+      "ms": 11,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "action-network-json",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 4
+        },
+        {
+          "tool": "click",
+          "ms": 258
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 3
+        }
+      ],
+      "ms": 267,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "action-network-html",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 6
+        },
+        {
+          "tool": "click",
+          "ms": 233
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 1
+        }
+      ],
+      "ms": 242,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "action-network-html-detailed",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 4
+        },
+        {
+          "tool": "click",
+          "ms": 244
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 2
+        }
+      ],
+      "ms": 252,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "cancel-press",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 12
+        },
+        {
+          "tool": "click",
+          "ms": 89
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 9
+        },
+        {
+          "tool": "click",
+          "ms": 250
+        }
+      ],
+      "reason": "post-cancel page state: {\"dragging\":false,\"committed\":33.04296875,\"activations\":0}\n+ actual - expected\n\n  {\n    activations: 0,\n+   committed: 33.04296875,\n-   committed: null,\n    dragging: false\n  }\n",
+      "ms": 1763,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": [
+        "/cancel-captured-press pressed",
+        "/cancel-captured-press next"
+      ]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "bookmark-portals",
+      "status": "unsupported",
+      "calls": [],
+      "reason": "No bookmark-folder tool in the Chrome DevTools MCP catalog",
+      "ms": 0,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "bookmark-short-name",
+      "status": "unsupported",
+      "calls": [],
+      "reason": "No bookmark-folder tool in the Chrome DevTools MCP catalog",
+      "ms": 0,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 4,
+      "task": "closed-target",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 3
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 28
+        },
+        {
+          "tool": "click",
+          "ms": 2
+        }
+      ],
+      "ms": 37,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "same-title",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 5348
+        }
+      ],
+      "ms": 5351,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a mark"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "never-active-tab",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 5
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 5346
+        }
+      ],
+      "reason": "page did not report /b mark",
+      "ms": 10412,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "mid-read-switch",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 5
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 141
+        }
+      ],
+      "ms": 146,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "cross-origin-frame",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_read_page",
+          "ms": 19
+        },
+        {
+          "tool": "chrome_read_page",
+          "ms": 21
+        },
+        {
+          "tool": "chrome_fill_or_select",
+          "ms": 863
+        }
+      ],
+      "ms": 907,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/child input", "/child input"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "action-network-json",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 235
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 6
+        }
+      ],
+      "ms": 248,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "action-network-html",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 4
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 228
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 6
+        }
+      ],
+      "reason": "MCP capture omitted the observed html HTTP 503 request (1 requests returned)",
+      "ms": 241,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "action-network-html-detailed",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 218
+        },
+        {
+          "tool": "chrome_network_capture",
+          "ms": 6
+        }
+      ],
+      "ms": 230,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "cancel-press",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 102
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 226
+        }
+      ],
+      "ms": 1732,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": [
+        "/cancel-captured-press pressed",
+        "/cancel-captured-press cancelled",
+        "/cancel-captured-press next"
+      ]
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "bookmark-portals",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "chrome_bookmark_search",
+          "ms": 3
+        },
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 2
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 7
+        },
+        {
+          "tool": "chrome_javascript",
+          "ms": 9
+        }
+      ],
+      "ms": 20,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "bookmark-short-name",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "chrome_bookmark_search",
+          "ms": 3
+        }
+      ],
+      "reason": "chrome_bookmark_search: Specified bookmark folder was not found.",
+      "ms": 3,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "webpage",
+      "iteration": 5,
+      "task": "closed-target",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "get_windows_and_tabs",
+          "ms": 3
+        },
+        {
+          "tool": "chrome_click_element",
+          "ms": 191
+        }
+      ],
+      "reason": "Missing expected rejection (ToolError): a click on a closed target must report an MCP error",
+      "ms": 203,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 1,
+      "pageEvents": ["/guard mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "same-title",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 49
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 69
+        },
+        {
+          "tool": "click",
+          "ms": 365
+        }
+      ],
+      "ms": 483,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "never-active-tab",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 26
+        },
+        {
+          "tool": "click",
+          "ms": 293
+        }
+      ],
+      "ms": 320,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/b mark"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "mid-read-switch",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 3
+        },
+        {
+          "tool": "evaluate_script",
+          "ms": 253
+        }
+      ],
+      "ms": 256,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "cross-origin-frame",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 5
+        },
+        {
+          "tool": "fill",
+          "ms": 5
+        }
+      ],
+      "reason": "fill: Error: Failed to interact with the element with uid 1_0. el.getAttribute is not a function",
+      "ms": 12,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "action-network-json",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 1
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 4
+        },
+        {
+          "tool": "click",
+          "ms": 258
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 2
+        }
+      ],
+      "ms": 264,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "action-network-html",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 6
+        },
+        {
+          "tool": "click",
+          "ms": 240
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 2
+        }
+      ],
+      "ms": 250,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "action-network-html-detailed",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 2
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 7
+        },
+        {
+          "tool": "click",
+          "ms": 245
+        },
+        {
+          "tool": "list_network_requests",
+          "ms": 2
+        }
+      ],
+      "ms": 257,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": ["/a checked"]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "cancel-press",
+      "status": "fail",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 3
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 3
+        },
+        {
+          "tool": "click",
+          "ms": 99
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 7
+        },
+        {
+          "tool": "click",
+          "ms": 252
+        }
+      ],
+      "reason": "post-cancel page state: {\"dragging\":false,\"committed\":33.04296875,\"activations\":0}\n+ actual - expected\n\n  {\n    activations: 0,\n+   committed: 33.04296875,\n-   committed: null,\n    dragging: false\n  }\n",
+      "ms": 1765,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": [
+        "/cancel-captured-press pressed",
+        "/cancel-captured-press next"
+      ]
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "bookmark-portals",
+      "status": "unsupported",
+      "calls": [],
+      "reason": "No bookmark-folder tool in the Chrome DevTools MCP catalog",
+      "ms": 0,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "bookmark-short-name",
+      "status": "unsupported",
+      "calls": [],
+      "reason": "No bookmark-folder tool in the Chrome DevTools MCP catalog",
+      "ms": 0,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    },
+    {
+      "adapter": "devtools",
+      "iteration": 5,
+      "task": "closed-target",
+      "status": "pass",
+      "calls": [
+        {
+          "tool": "list_pages",
+          "ms": 1
+        },
+        {
+          "tool": "take_snapshot",
+          "ms": 29
+        },
+        {
+          "tool": "click",
+          "ms": 2
+        }
+      ],
+      "ms": 36,
+      "unexpectedTabActivations": 0,
+      "wrongTargetWrites": 0,
+      "pageEvents": []
+    }
+  ],
+  "errors": []
+}

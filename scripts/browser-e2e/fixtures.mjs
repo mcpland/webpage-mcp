@@ -207,10 +207,11 @@ const PAGES = {
   ),
 };
 
-export function startFixtureServer() {
+export function startFixtureServer(handleRequest) {
   const logs = [];
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://fixture");
+    if (handleRequest?.(req, res, url)) return;
     if (req.method === "POST" && url.pathname === "/log") {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
