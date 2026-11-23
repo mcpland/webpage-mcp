@@ -169,6 +169,7 @@ describe('network capture backend boundaries', () => {
       7,
       'Network.getResponseBody',
       expect.anything(),
+      expect.anything(),
     );
     const request = (networkDebuggerStartTool as any).captureData.get(7).requests['request-1'];
     expect(request.responseBodyOmitted).toBe('known_size_limit');
@@ -267,6 +268,35 @@ describe('network capture backend boundaries', () => {
     expect(result.isError).toBe(false);
     for (const id of [7, 8]) expect(cdp.detach).toHaveBeenCalledWith(id, 'network-capture');
     expect(backend.hasAvailableCapture()).toBe(false);
+  });
+
+  it('cancels an outstanding child response-body read when all captures stop', async () => {
+    const { networkDebuggerStartTool: backend, networkDebuggerStopTool: stop } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-debugger'
+    );
+    vi.mocked(chrome.tabs.get).mockImplementation(async id => tab(id));
+    const active = backend as any;
+    await active.startCaptureForTab(7, { maxCaptureTime: 30_000, inactivityTimeout: 10_000, includeStatic: true });
+    await active.handleTabCreated({ id: 8, openerTabId: 7 });
+    active.handleRequestWillBeSent(8, { requestId: 'json', request: {
+      url: 'https://example.com/api/data', method: 'GET', headers: {},
+    }, timestamp: 1, type: 'Fetch' });
+    active.handleResponseReceived(8, { requestId: 'json', response: {
+      status: 200, mimeType: 'application/json', headers: {},
+    }, timestamp: 2, type: 'Fetch' });
+    let bodySignal: AbortSignal | undefined;
+    cdp.sendCommand.mockImplementation(async (_id, method, _params, signal) => {
+      if (method !== 'Network.getResponseBody') return {};
+      bodySignal = signal;
+      return new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)));
+    });
+    const reading = active.handleLoadingFinished(8, { requestId: 'json', encodedDataLength: 12 });
+    expect(bodySignal?.aborted).toBe(false);
+    expect((await stop.execute({ all: true })).isError).toBe(false);
+    await reading;
+    expect(bodySignal?.aborted).toBe(true);
+    expect(active.pendingResponseBodies.size).toBe(0);
+    expect(cdp.detach).toHaveBeenCalledWith(8, 'network-capture');
   });
 
   it('releases the child debugger lease when a dialog stalls enable and disable', async () => {

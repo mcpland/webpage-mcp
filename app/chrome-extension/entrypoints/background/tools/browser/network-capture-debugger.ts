@@ -268,6 +268,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
         byteLimitReached: false,
         storedBytes: 0,
         responseBodyBytes: 0,
+        bodyReads: new AbortController(),
         rootTabId: options.rootTabId ?? tabId,
         lineageDepth: options.lineageDepth ?? 0,
         deadlineAt,
@@ -657,7 +658,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     ) {
       try {
         // console.log(`NetworkDebuggerStartTool: Attempting to get response body for ${requestId} (${requestInfo.url})`);
-        const responseBodyData = await this.getResponseBody(tabId, requestId);
+        const responseBodyData = await this.getResponseBody(tabId, requestId, captureInfo.bodyReads.signal);
+        if (captureInfo.bodyReads.signal.aborted) return;
         if (responseBodyData) {
           const bodyLimit = Math.min(
             NETWORK_CAPTURE_LIMITS.maxResponseBodyBytes,
@@ -705,6 +707,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
           // console.log(`NetworkDebuggerStartTool: Successfully got response body for ${requestId}, size: ${requestInfo.responseBody?.length || 0} bytes`);
         }
       } catch (error) {
+        if (captureInfo.bodyReads.signal.aborted) return;
         // console.warn(`NetworkDebuggerStartTool: Failed to get response body for ${requestId}:`, error);
         this.setRequestField(
           captureInfo,
@@ -795,6 +798,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
   private async getResponseBody(
     tabId: number,
     requestId: string,
+    signal: AbortSignal,
   ): Promise<{ body: string; base64Encoded: boolean } | null> {
     const pendingKey = `${tabId}_${requestId}`;
     if (this.pendingResponseBodies.has(pendingKey)) {
@@ -809,7 +813,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
         // Will attach temporarily if needed
         const result = (await cdpSessionManager.sendCommand(tabId, 'Network.getResponseBody', {
           requestId,
-        })) as { body: string; base64Encoded: boolean };
+        }, signal)) as { body: string; base64Encoded: boolean };
         return result;
       } finally {
         this.pendingResponseBodies.delete(pendingKey); // Clean up after promise resolves or rejects
@@ -831,11 +835,9 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     }
 
     this.lastActivityTime.delete(tabId);
+    this.captureData.get(tabId)?.bodyReads.abort();
     this.captureData.delete(tabId);
     this.requestCounters.delete(tabId);
-
-    // In-flight CDP commands cannot be aborted. Keep their entries until their
-    // own finally block runs so the global concurrency cap remains truthful.
 
     console.log(`NetworkDebuggerStartTool: Cleaned up resources for tab ${tabId}.`);
   }
