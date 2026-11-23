@@ -224,7 +224,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
     try {
       const callerSignal = inputSignal(context);
       callerSignal?.throwIfAborted();
-      const explicit = await this.tryGetTab(args.tabId);
+      const explicit = await this.getRequestedTab(args.tabId);
       let tab =
         explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {

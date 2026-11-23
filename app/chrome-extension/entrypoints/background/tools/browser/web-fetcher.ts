@@ -386,7 +386,7 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
       const query = normalizeInteractiveElementsQuery(args);
       const input = args && typeof args === 'object' ? args : ({} as GetInteractiveElementsToolParams);
       const { tabId, windowId } = input;
-      const explicit = await this.tryGetTab(tabId);
+      const explicit = await this.getRequestedTab(tabId);
       const tab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!tab) {
         return createErrorResponse('No active tab found');

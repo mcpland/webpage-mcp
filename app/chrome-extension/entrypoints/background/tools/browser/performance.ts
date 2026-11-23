@@ -666,7 +666,7 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
     let state: TraceSessionState | undefined;
 
     try {
-      const explicit = await this.tryGetTab(targetTabIdParam);
+      const explicit = await this.getRequestedTab(targetTabIdParam);
       const activeTab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!activeTab?.id) {
         return createErrorResponse('No active tab found');
@@ -765,7 +765,7 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
     let session: TraceSessionState | undefined;
 
     try {
-      const explicit = await this.tryGetTab(targetTabIdParam);
+      const explicit = await this.getRequestedTab(targetTabIdParam);
       const activeTab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!activeTab?.id) return createErrorResponse('No active tab found');
       tabId = activeTab.id;
@@ -919,7 +919,7 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
   async execute(args: AnalyzeInsightParams & { timeoutMs?: number }): Promise<ToolResult> {
     const { insightName, tabId: targetTabIdParam, windowId } = args || {};
     try {
-      const explicit = await this.tryGetTab(targetTabIdParam);
+      const explicit = await this.getRequestedTab(targetTabIdParam);
       const activeTab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!activeTab?.id) return createErrorResponse('No active tab found');
       if (isNonPublicPageUrl(activeTab.url)) {

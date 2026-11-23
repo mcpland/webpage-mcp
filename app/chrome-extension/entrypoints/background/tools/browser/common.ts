@@ -1105,7 +1105,7 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
 
       // If no tabIds or URL provided, close the current active tab
       console.log('No tabIds or URL provided, closing target active tab');
-      const explicit = await this.tryGetTab(tabId);
+      const explicit = await this.getRequestedTab(tabId);
       const activeTab =
         explicit ||
         (typeof windowId === 'number'

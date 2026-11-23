@@ -245,6 +245,15 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
     }
   }
 
+  /** Only an omitted target may fall back to the active tab. */
+  protected async getRequestedTab(tabId?: number): Promise<chrome.tabs.Tab | null> {
+    const tab = await this.tryGetTab(tabId);
+    if (tabId !== undefined && !tab) {
+      throw new Error(`Target tab ${tabId} is no longer available`);
+    }
+    return tab;
+  }
+
   /**
    * Get the active tab in the current window. Throws when not found.
    */

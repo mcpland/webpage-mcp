@@ -544,7 +544,7 @@ class BookmarkAddTool extends BaseBrowserToolExecutor {
 
       if (!bookmarkUrl) {
         // Get target tab
-        const explicit = await this.tryGetTab(tabId);
+        const explicit = await this.getRequestedTab(tabId);
         const tab = explicit || (await this.getActiveTabInWindow(windowId));
         if (!tab || !tab.url) {
           // tab.url might be undefined (e.g., chrome:// pages)

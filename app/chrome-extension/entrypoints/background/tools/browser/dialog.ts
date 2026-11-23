@@ -64,7 +64,7 @@ class HandleDialogTool extends BaseBrowserToolExecutor {
     }
 
     try {
-      const explicit = await this.tryGetTab(tabId);
+      const explicit = await this.getRequestedTab(tabId);
       const tab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!tab?.id) return createErrorResponse('No active tab found');
       if (hasDisallowedPublicUrlScheme(String(tab.url || ''))) {

@@ -350,6 +350,9 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
     // current page, such as a fresh browser's new-tab page, does not matter.
     if (!normalizedUrl) {
       const explicitTab = await this.tryGetTab(args.tabId);
+      if (args.tabId !== undefined && !explicitTab) {
+        return createErrorResponse(`Target tab ${args.tabId} is no longer available`);
+      }
       const targetTab = explicitTab || (await this.getActiveTabInWindow(args.windowId));
       if (targetTab?.url && hasDisallowedPublicPageScheme(String(targetTab.url))) {
         return createErrorResponse(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);

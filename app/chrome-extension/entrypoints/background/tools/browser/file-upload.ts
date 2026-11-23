@@ -145,7 +145,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     }
 
     try {
-      const explicit = await this.tryGetTab(args.tabId);
+      const explicit = await this.getRequestedTab(args.tabId);
       const uploadTarget = explicit || (await this.getActiveTabInWindow(args.windowId));
       if (!uploadTarget?.id) {
         return createErrorResponse('No active tab found');
@@ -228,7 +228,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
   ): Promise<ToolResult> {
     const { selector, tabId: targetTabId, windowId } = args;
 
-    const explicit = await this.tryGetTab(targetTabId);
+    const explicit = await this.getRequestedTab(targetTabId);
     const tab = explicit || (await this.getActiveTabOrThrowInWindow(windowId));
     if (!tab.id) return createErrorResponse('No active tab found');
     if (!isPublicUploadPage(tab.url)) {

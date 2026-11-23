@@ -155,7 +155,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       const standardTips =
         'Missing an element? Retry with scope="page", or take a screenshot and act by coordinates. markedElements are user-marked targets and take priority.';
 
-      const explicit = await this.tryGetTab(args?.tabId);
+      const explicit = await this.getRequestedTab(args?.tabId);
       let tab =
         explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
       if (!tab.id)

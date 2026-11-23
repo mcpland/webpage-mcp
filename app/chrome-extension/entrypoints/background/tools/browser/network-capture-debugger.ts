@@ -1183,7 +1183,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     let blankRecovery: { tabId: number; url: string } | undefined;
 
     try {
-      const explicitTab = await this.tryGetTab(targetTabId);
+      const explicitTab = await this.getRequestedTab(targetTabId);
       // The page at targetUrl is loaded only once the debugger is attached;
       // loading it first lost its earliest requests, often the ones that matter.
       let loadAfterStart: string | undefined;

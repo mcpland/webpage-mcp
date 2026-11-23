@@ -228,7 +228,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
       return createErrorResponse('Action parameter is required');
 
     try {
-      const explicit = await this.tryGetTab(args.tabId);
+      const explicit = await this.getRequestedTab(args.tabId);
       const tab =
         explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id)

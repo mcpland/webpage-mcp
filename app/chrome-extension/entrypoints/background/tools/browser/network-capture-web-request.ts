@@ -1068,7 +1068,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
     let blankRecovery: { tabId: number; url: string } | undefined;
 
     try {
-      const explicitTab = await this.tryGetTab(targetTabId);
+      const explicitTab = await this.getRequestedTab(targetTabId);
       // Get current tab or create new tab
       let tabToOperateOn: chrome.tabs.Tab;
 
