@@ -128,12 +128,12 @@ const PAGES = {
 
   "/submit-focus-dialog": page(
     "Focus before submit",
-    `<form onsubmit="event.preventDefault(); document.body.dataset.submitted = 'yes'">
-      <input id="target" oninput="this.form.other.focus()"
-        onfocus="if (this.value) alert('Refocusing field')" />
+    `<form onsubmit="event.preventDefault(); document.body.dataset.submits++">
+      <input id="target" oninput="this.dataset.edited = 'yes'; this.form.other.focus()"
+        onfocus="if (this.dataset.edited) { delete this.dataset.edited; alert('Refocusing field'); }" />
       <input name="other" />
       <button>Submit</button>
-    </form>`,
+    </form><script>document.body.dataset.submits = '0';</script>`,
   ),
 
   "/realform": page(

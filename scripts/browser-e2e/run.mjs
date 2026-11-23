@@ -514,11 +514,15 @@ const scenarios = {
       assert.ok(handled.ok, `${tool}: ${handled.text}`);
       assert.equal(handled.json?.nextDialog, undefined, `${tool}: ${handled.text}`);
       assert.equal(result.json?.submitted, false, result.text);
-      const actual = await t.call("chrome_javascript", {
-        tabId,
-        code: "return document.body.dataset.submitted || 'no'",
+      const submitCount = () => t.call("chrome_javascript", {
+        tabId, code: "return document.body.dataset.submits",
       });
-      assert.equal(actual.json?.result, "no", actual.text);
+      const afterDismissal = await submitCount();
+      assert.equal(afterDismissal.json?.result, "0", afterDismissal.text);
+      const enter = await t.call("chrome_keyboard", { tabId, selector: "#target", keys: "Enter" });
+      assert.ok(enter.ok, enter.text);
+      const afterEnter = await submitCount();
+      assert.equal(afterEnter.json?.result, "1", afterEnter.text);
     }
   },
 
