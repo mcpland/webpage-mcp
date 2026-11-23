@@ -186,6 +186,25 @@ The Chrome extension and the `webpage-mcp` npm package are built and released fr
 
 We aim to keep nearby versions compatible. If you run into connection, protocol, or tool behavior issues, first make sure the Chrome extension and the MCP npm package use the same version for the best compatibility.
 
+#### Upgrading from 0.10.2 to 0.11.0
+
+- **Screenshots.** `chrome_screenshot` now returns an inline MCP image by default. For a PNG in Downloads, pass `{ "storeBase64": false, "savePng": true }`. For inline captures, read `data` and `mimeType` from the `image` content block. This also applies to the `screenshot` and `zoom` actions of `chrome_computer`.
+- **Keyboard and forms.** `chrome_computer` reports an error for unknown key names. Use `action: "type"` for literal text. With `action: "fill_form"`, inspect `results` for each field. A partial fill sets the payload's `success` to `false`; if every field fails, the MCP result also sets `isError` to `true`.
+- **Navigation and frame references.** `chrome_navigate` waits for the page to load by default. Pass `waitUntil: "commit"` to resume when navigation commits. Pass references from `chrome_read_page` back verbatim, including iframe prefixes such as `f5:ref_3`.
+
+During a staggered rollout, the installed extension determines the screenshot format. Returning a snapshot with `chrome_navigate` also requires the updated extension. A client supporting both screenshot formats can request `storeBase64: true` and read either response.
+
+```js
+const result = await client.callTool({
+  name: "chrome_screenshot",
+  arguments: { storeBase64: true },
+});
+const text = result.content.find((block) => block.type === "text");
+if (result.isError) throw new Error(text?.text ?? "Screenshot failed");
+const image = result.content.find((block) => block.type === "image");
+const base64 = image?.data ?? JSON.parse(text.text).base64Data;
+```
+
 ### Build From Source (Developers)
 
 <details>
