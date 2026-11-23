@@ -6,41 +6,41 @@ const SOCKET_ENV = 'WEBPAGE_MCP_NATIVE_SOCKET';
 const SOCKET_DIR_ENV = 'WEBPAGE_MCP_NATIVE_SOCKET_DIR';
 const SOCKET_DIR_NAME = '.webpage-mcp';
 
-function getSocketUserToken(): string {
-  if (process.platform === 'win32') {
+function getSocketUserToken(platform: NodeJS.Platform): string {
+  if (platform === 'win32') {
     return (process.env.USERNAME || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
   }
   const uid = typeof process.getuid === 'function' ? process.getuid() : 'default';
   return String(uid).replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
-function getDefaultUnixSocketPath(): string {
+function getDefaultUnixSocketPath(platform: NodeJS.Platform): string {
   const explicitDir = process.env[SOCKET_DIR_ENV]?.trim();
   if (explicitDir) {
-    return path.join(explicitDir, `native-${getSocketUserToken()}.sock`);
+    return path.posix.join(explicitDir, `native-${getSocketUserToken(platform)}.sock`);
   }
   const homeDir = process.env.HOME?.trim() || os.homedir();
-  return path.join(homeDir, SOCKET_DIR_NAME, `native-${getSocketUserToken()}.sock`);
+  return path.posix.join(homeDir, SOCKET_DIR_NAME, `native-${getSocketUserToken(platform)}.sock`);
 }
 
-export function getLegacyNativeSocketPath(): string {
-  if (process.platform === 'win32') {
-    return `\\\\.\\pipe\\webpage-mcp-native-${getSocketUserToken()}`;
+export function getLegacyNativeSocketPath(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') {
+    return `\\\\.\\pipe\\webpage-mcp-native-${getSocketUserToken(platform)}`;
   }
-  return path.join(os.tmpdir(), `webpage-mcp-native-${getSocketUserToken()}.sock`);
+  return path.posix.join(os.tmpdir(), `webpage-mcp-native-${getSocketUserToken(platform)}.sock`);
 }
 
-export function getNativeSocketPath(): string {
+export function getNativeSocketPath(platform: NodeJS.Platform = process.platform): string {
   const explicit = process.env[SOCKET_ENV]?.trim();
   if (explicit) {
     return explicit;
   }
 
-  if (process.platform === 'win32') {
-    return `\\\\.\\pipe\\webpage-mcp-native-${getSocketUserToken()}`;
+  if (platform === 'win32') {
+    return `\\\\.\\pipe\\webpage-mcp-native-${getSocketUserToken(platform)}`;
   }
 
-  return getDefaultUnixSocketPath();
+  return getDefaultUnixSocketPath(platform);
 }
 
 export function hasExplicitNativeSocketConfig(): boolean {
@@ -66,12 +66,12 @@ export function isNativeSocketPathWithinLimit(
 export function getNativeSocketPathCandidates(
   platform: NodeJS.Platform = process.platform,
 ): string[] {
-  const primaryPath = getNativeSocketPath();
+  const primaryPath = getNativeSocketPath(platform);
   if (hasExplicitNativeSocketConfig()) {
     return [primaryPath];
   }
 
-  const legacyPath = getLegacyNativeSocketPath();
+  const legacyPath = getLegacyNativeSocketPath(platform);
   if (legacyPath === primaryPath || !isNativeSocketPathWithinLimit(legacyPath, platform)) {
     return [primaryPath];
   }

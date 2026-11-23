@@ -47,6 +47,13 @@ describe('assertNativeSocketPathFits', () => {
 });
 
 describe('getNativeSocketPathCandidates', () => {
+  it('returns a single named pipe for Windows regardless of the host platform', () => {
+    vi.stubEnv('WEBPAGE_MCP_NATIVE_SOCKET', '');
+    vi.stubEnv('WEBPAGE_MCP_NATIVE_SOCKET_DIR', '');
+    vi.stubEnv('USERNAME', 'example.user');
+    expect(getNativeSocketPathCandidates('win32')).toEqual([String.raw`\\.\pipe\webpage-mcp-native-example_user`]);
+  });
+
   it('omits the legacy tmp path when WEBPAGE_MCP_NATIVE_SOCKET_DIR is set', () => {
     vi.stubEnv('WEBPAGE_MCP_NATIVE_SOCKET', '');
     vi.stubEnv('WEBPAGE_MCP_NATIVE_SOCKET_DIR', '/tmp/short-wmcp');
