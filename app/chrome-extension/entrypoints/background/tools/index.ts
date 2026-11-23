@@ -122,6 +122,8 @@ const getLazyTool = async (toolName: string) => {
  * Tool call parameter interface
  */
 export interface ToolCallParam {
+  /** Deadline forwarded by workflow steps to pending browser input. */
+  deadlineAt?: number;
   name: string;
   args: any;
   signal?: AbortSignal;
@@ -470,10 +472,11 @@ export const handleCallTool = async (param: ToolCallParam) => {
     throwIfToolAborted(param.signal);
 
     const executionContext =
-      param.signal ||
+      param.signal || param.deadlineAt !== undefined ||
       (param.meta &&
         (param.meta.clientCapabilities !== undefined || MCP_CONTEXT_AWARE_TOOLS.has(param.name)))
         ? {
+            ...(param.deadlineAt !== undefined ? { deadlineAt: param.deadlineAt } : {}),
             ...(param.meta ? { meta: param.meta } : {}),
             ...(param.signal ? { signal: param.signal } : {}),
           }

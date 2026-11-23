@@ -73,6 +73,19 @@ describe('interaction tools', () => {
     expect(tryGetTab).not.toHaveBeenCalled();
   });
 
+  it('discards a workflow click whose target resolves after cancellation', async () => {
+    const cancel = new AbortController();
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue(makeTab({ url: 'https://example.com/' }));
+    vi.spyOn(clickTool as any, 'resolveTarget').mockImplementation(async () => {
+      cancel.abort();
+      return { nativeCoordinates: { x: 10, y: 10 }, elementInfo: {} };
+    });
+    const result = await clickTool.execute({ tabId: 7, background: true, coordinates: { x: 10, y: 10 } }, { signal: cancel.signal });
+    expect(result.isError).toBe(true);
+    expect(mocks.attach).not.toHaveBeenCalled();
+    expect(mocks.tabsSendMessage).not.toHaveBeenCalled();
+  });
+
   it('uses CDP native click dispatch for public pages', async () => {
     const tryGetTab = vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue(
       makeTab({
@@ -134,6 +147,7 @@ describe('interaction tools', () => {
         buttons: 0,
         modifiers: 0,
       },
+      expect.any(AbortSignal),
     );
     expect(mocks.sendCommand).toHaveBeenCalledWith(
       7,
@@ -147,6 +161,7 @@ describe('interaction tools', () => {
         clickCount: 1,
         modifiers: 0,
       },
+      expect.any(AbortSignal),
     );
     expect(mocks.sendCommand).toHaveBeenCalledWith(
       7,
@@ -160,6 +175,7 @@ describe('interaction tools', () => {
         clickCount: 1,
         modifiers: 0,
       },
+      expect.any(AbortSignal),
     );
     expect(mocks.detach).toHaveBeenCalledWith(7, 'click');
     expect(mocks.tabsSendMessage).not.toHaveBeenCalledWith(7, {
@@ -234,6 +250,7 @@ describe('interaction tools', () => {
         buttons: 0,
         modifiers: 0,
       },
+      expect.any(AbortSignal),
     );
     expect(mocks.sendCommand).toHaveBeenCalledWith(
       7,
@@ -247,6 +264,7 @@ describe('interaction tools', () => {
         clickCount: 1,
         modifiers: 0,
       },
+      expect.any(AbortSignal),
     );
     expect(mocks.sendCommand).toHaveBeenCalledWith(
       7,
@@ -260,6 +278,7 @@ describe('interaction tools', () => {
         clickCount: 1,
         modifiers: 0,
       },
+      expect.any(AbortSignal),
     );
   });
 
@@ -453,6 +472,7 @@ describe('interaction tools', () => {
         buttons: 0,
         modifiers: 0,
       },
+      expect.any(AbortSignal),
     );
   });
 

@@ -25,6 +25,7 @@ export type Schema<T> = z.ZodType<T, z.ZodTypeDef, unknown>;
  * @description The runtime context provided to the node executor
  */
 export interface NodeExecutionContext {
+  signal?: AbortSignal;
   /** Run ID */
   runId: RunId;
   /** Flow Definition (snapshot) */

@@ -77,6 +77,20 @@ describe('click-helper bounded text summaries', () => {
     vi.restoreAllMocks();
   });
 
+  it('discards an expired workflow click already delivered to the renderer', async () => {
+    const button = document.createElement('button');
+    const clicked = vi.fn();
+    button.onclick = clicked;
+    document.body.append(button);
+    mockElementFromPoint(button);
+    mockMouseEvent();
+    const response = await dispatch(loadHelper(), {
+      action: 'clickElement', coordinates: { x: 5, y: 5 }, deadlineAt: Date.now() - 1,
+    });
+    expect(response.error).toContain('timed out');
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
   it('summarizes descendant text without reading subtree textContent', async () => {
     const button = document.createElement('button');
     button.append(document.createTextNode('Bounded '));

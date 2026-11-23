@@ -75,6 +75,7 @@ async function dispatchNativeClick(
     double?: boolean;
     modifiers?: ClickToolParams['modifiers'];
     dialog?: DialogResponse;
+    signal?: AbortSignal;
   },
 ): Promise<CdpInputResult> {
   const button = options.button || 'left';
@@ -85,7 +86,8 @@ async function dispatchNativeClick(
   return runCdpInputWithDialogs(
     tabId,
     'click',
-    async (signal) => {
+    async (dialogSignal) => {
+      const signal = options.signal ? AbortSignal.any([options.signal, dialogSignal]) : dialogSignal;
       if (signal.aborted) return;
       await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
         type: 'mouseMoved',
@@ -94,7 +96,7 @@ async function dispatchNativeClick(
         button: 'none',
         buttons: 0,
         modifiers,
-      });
+      }, signal);
 
       for (let index = 1; index <= clickCount; index += 1) {
         if (signal.aborted) return;
@@ -106,7 +108,7 @@ async function dispatchNativeClick(
           buttons: buttonMask,
           clickCount: index,
           modifiers,
-        });
+        }, signal);
         if (signal.aborted) return;
         await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
           type: 'mouseReleased',
@@ -116,7 +118,7 @@ async function dispatchNativeClick(
           buttons: 0,
           clickCount: index,
           modifiers,
-        });
+        }, signal);
       }
     },
     { dialog: options.dialog },
@@ -168,6 +170,7 @@ async function dispatchHelperClick(
   tabId: number,
   args: ClickToolParams,
   target?: HelperClickTarget,
+  context?: { signal?: AbortSignal; deadlineAt?: number },
 ): Promise<any> {
   const frameId = target?.frameId ?? args.frameId;
   const selector = target ? target.selector : args.selector;
@@ -181,10 +184,12 @@ async function dispatchHelperClick(
     false,
     typeof frameId === 'number' ? [frameId] : undefined,
   );
+  context?.signal?.throwIfAborted();
   return tool.sendMessageToTab(
     tabId,
     {
       action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+      ...(context?.deadlineAt !== undefined ? { deadlineAt: context.deadlineAt } : {}),
       selector,
       coordinates,
       ref,
@@ -378,7 +383,7 @@ class ClickTool extends BaseBrowserToolExecutor {
    */
   async execute(
     args: ClickToolParams,
-    context?: { signal?: AbortSignal },
+    context?: { signal?: AbortSignal; deadlineAt?: number },
   ): Promise<ToolResult> {
     const {
       selector,
@@ -422,6 +427,11 @@ class ClickTool extends BaseBrowserToolExecutor {
     }
 
     try {
+      const deadline = context?.deadlineAt;
+      if (deadline !== undefined && deadline <= Date.now()) throw new Error('Workflow click timed out');
+      const deadlineSignal = deadline === undefined ? undefined : AbortSignal.timeout(Math.min(Math.max(0, deadline - Date.now()), 2_147_483_647));
+      const signal = deadlineSignal && context?.signal ? AbortSignal.any([deadlineSignal, context.signal]) : deadlineSignal ?? context?.signal;
+      signal?.throwIfAborted();
       // Resolve tab
       const explicit = await this.tryGetTab(args.tabId);
       let tab =
@@ -448,6 +458,7 @@ class ClickTool extends BaseBrowserToolExecutor {
 
       const beforeUrl = String(tab.url || '');
       const resolvedTarget = await this.resolveTarget(targetTabId, args);
+      signal?.throwIfAborted();
       let navigationOccurred = false;
       let transport: 'cdp' | 'helper' = resolvedTarget.nativeCoordinates
         ? 'cdp'
@@ -469,7 +480,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         let helperResult: any;
         try {
           helperResult = await withTimeout(
-            dispatchHelperClick(this, targetTabId, args, resolvedTarget.helperTarget),
+            dispatchHelperClick(this, targetTabId, args, resolvedTarget.helperTarget, { signal, deadlineAt: deadline }),
             Math.max(Number(timeout) || 0, 0) + HELPER_CLICK_RESPONSE_MARGIN_MS,
             'Page response to the click',
           );
@@ -513,8 +524,10 @@ class ClickTool extends BaseBrowserToolExecutor {
                 double: args.double === true,
                 modifiers,
                 dialog: dialogResponse,
+                signal,
               },
             );
+            signal?.throwIfAborted();
             dialog = input.dialog;
             dialogs = input.dialogs;
             if (waitForNavigation && !(dialog && dialog.handled === false)) {

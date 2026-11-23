@@ -598,6 +598,8 @@ async function enqueueResolvedRunAndWait(
   resolvedTabId: number,
 ): Promise<{ run: RunRecordV3; events: RunEvent[]; result: RunResult }> {
   throwIfRunAborted(input.signal);
+  const timeoutMs = Math.max(1_000, input.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS);
+  const deadline = Date.now() + timeoutMs;
   const { runId } = await enqueueRun(
     {
       storage: runtime.storage,
@@ -609,15 +611,12 @@ async function enqueueResolvedRunAndWait(
       expectedRevision: input.expectedRevision,
       tabId: resolvedTabId,
       args: input.args,
-      execution: input.execution,
+      execution: { ...input.execution, deadlineAt: deadline },
       startNodeId: input.startNodeId as FlowV3["entryNodeId"] | undefined,
       stopBeforeNodeId: input.stopBeforeNodeId as FlowV3["entryNodeId"] | undefined,
       endNodeId: input.endNodeId as FlowV3["entryNodeId"] | undefined,
     },
   );
-
-  const timeoutMs = Math.max(1_000, input.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS);
-  const deadline = Date.now() + timeoutMs;
 
   let run: RunRecordV3 | null = null;
   try {
@@ -650,9 +649,7 @@ async function enqueueResolvedRunAndWait(
     throw error;
   }
 
-  if (input.tabTarget === "new" && input.tabId === undefined) {
-    await cancelRunAfterAbort(runtime, runId as RunId);
-  }
+  await cancelRunAfterAbort(runtime, runId as RunId);
   throw new Error(`Run "${runId}" did not finish within ${timeoutMs}ms`);
 }
 

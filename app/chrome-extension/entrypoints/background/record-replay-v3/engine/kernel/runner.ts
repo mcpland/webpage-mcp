@@ -328,6 +328,7 @@ class StorageBackedRunRunner implements RunRunner {
 
   private startPromise: Promise<RunResult> | null = null;
   private outputs: JsonObject = {};
+  private readonly cancellation = new AbortController();
   private cancelReason: string | undefined;
   private pauseWaiter: Deferred<void> | null = null;
 
@@ -382,6 +383,7 @@ class StorageBackedRunRunner implements RunRunner {
   cancel(reason?: string): void {
     if (this.state.canceled) return;
     this.state.canceled = true;
+    this.cancellation.abort();
     this.cancelReason = reason;
 
     if (this.state.paused) {
@@ -670,6 +672,7 @@ class StorageBackedRunRunner implements RunRunner {
       );
 
       const exec = await this.executeNodeAttempt(flow, node);
+      if (this.state.canceled) return { terminal: 'canceled' };
       const policy = this.resolveNodePolicy(flow, node);
       if (exec.status === 'succeeded') {
         const tookMs = this.env.now() - nodeStartAt;
@@ -1006,6 +1009,7 @@ class StorageBackedRunRunner implements RunRunner {
     }
 
     const ctx: NodeExecutionContext = {
+      signal: this.cancellation.signal,
       runId: this.runId,
       flow,
       nodeId: node.id,

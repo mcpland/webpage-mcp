@@ -50,8 +50,9 @@ async function executeClick<T extends 'click' | 'dblclick'>(
   }
 
   // Ensure page is read before locating element
-  await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
+  await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, signal: ctx.signal, args: { tabId, frameId: ctx.frameId } });
 
+  ctx.signal?.throwIfAborted();
   // Only read beforeUrl if we need to do nav-wait
   const beforeUrl = skipNavWait ? '' : await readTabUrl(tabId);
   const { selectorTarget, firstCandidateType, firstCssOrAttr } = toSelectorTarget(
@@ -87,6 +88,8 @@ async function executeClick<T extends 'click' | 'dblclick'>(
 
   const clickResult = await handleCallTool({
     name: TOOL_NAMES.BROWSER.CLICK,
+    signal: ctx.signal,
+    deadlineAt: ctx.execution?.deadlineAt,
     args: {
       ref: refToUse,
       selector: selectorToUse,

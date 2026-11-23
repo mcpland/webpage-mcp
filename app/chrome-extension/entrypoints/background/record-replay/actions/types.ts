@@ -777,6 +777,8 @@ export type ValidationResult = { ok: true } | { ok: false; errors: NonEmptyArray
  * Used to avoid duplicate retry/nav-wait when StepRunner owns these policies.
  */
 export interface ExecutionFlags {
+  /** Absolute deadline of a synchronous workflow run, including queued input. */
+  deadlineAt?: number;
   /**
    * When true, navigation waiting should be handled by StepRunner.
    * Action handlers (click, navigate) should skip their internal nav-wait logic.
@@ -808,6 +810,7 @@ export interface ExecutionFlags {
 }
 
 export interface ActionExecutionContext {
+  signal?: AbortSignal;
   vars: VariableStore;
   tabId: number;
   frameId?: number;

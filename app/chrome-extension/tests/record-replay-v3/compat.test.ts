@@ -132,6 +132,29 @@ describe("record-replay-v3 compat", () => {
     );
   });
 
+  it("passes the global deadline to the active action and cancels a timed-out run on its bound tab", async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime = createRuntime();
+      const cancel = vi.fn();
+      runtime.runners.set("run-1", { cancel });
+      runtime.storage.runs.get.mockResolvedValue({ id: "run-1", status: "running" });
+      mocks.bootstrapV3.mockResolvedValue(runtime);
+      asMock(chrome.tabs.get).mockResolvedValue({ id: 22, url: "https://example.com/", status: "complete" });
+      const deadlineAt = Date.now() + 1000;
+      const result = expect(enqueueRunAndWait({ flowId: "flow" as any, tabId: 22, timeoutMs: 1000 }))
+        .rejects.toThrow("did not finish within 1000ms");
+      await vi.advanceTimersByTimeAsync(1500);
+      await result;
+      expect(mocks.enqueueRun).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        tabId: 22, execution: expect.objectContaining({ deadlineAt }),
+      }));
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("cancels an active workflow runner when its originating request aborts", async () => {
     const runtime = createRuntime();
     const cancel = vi.fn();

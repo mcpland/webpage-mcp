@@ -340,6 +340,7 @@ export function adaptActionHandlerToNodeDefinition<T extends ExecutableActionTyp
       const v2Vars = deepClone(beforeVars) as unknown as Record<string, unknown>;
 
       const v2Ctx: ActionExecutionContext = {
+        signal: ctx.signal,
         vars: v2Vars as unknown as ActionExecutionContext['vars'],
         tabId: effectiveTabId,
         frameId: effectiveFrameId,

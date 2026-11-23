@@ -232,6 +232,9 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         clickY = updatedRect.top + updatedRect.height / 2;
       }
 
+      if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
+        return { error: 'Workflow click timed out' };
+      }
       let navigationPromise;
       if (waitForNavigation) {
         navigationPromise = new Promise((resolve) => {
@@ -420,6 +423,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         request.ref,
         !!request.double,
         {
+          deadlineAt: request.deadlineAt,
           button: request.button,
           bubbles: request.bubbles,
           cancelable: request.cancelable,
