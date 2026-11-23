@@ -653,6 +653,9 @@ class StorageBackedRunRunner implements RunRunner {
 
   private async runNode(flow: FlowV3, node: NodeV3, nodeStartAt: number): Promise<NodeRunResult> {
     let attempt = 1;
+    const policy = this.resolveNodePolicy(flow, node);
+    const nodeDeadline = policy.timeout?.scope === 'node' && policy.timeout.ms > 0
+      ? Date.now() + policy.timeout.ms : undefined;
 
     for (;;) {
       if (this.state.canceled) return { terminal: 'canceled' };
@@ -671,9 +674,8 @@ class StorageBackedRunRunner implements RunRunner {
         } as RunEventInput),
       );
 
-      const exec = await this.executeNodeAttempt(flow, node);
+      const exec = await this.executeNodeAttempt(flow, node, policy, nodeDeadline);
       if (this.state.canceled) return { terminal: 'canceled' };
-      const policy = this.resolveNodePolicy(flow, node);
       if (exec.status === 'succeeded') {
         const tookMs = this.env.now() - nodeStartAt;
 
@@ -750,13 +752,13 @@ class StorageBackedRunRunner implements RunRunner {
               )
             : true);
 
-        if (!canRetry) {
+        if (!canRetry || (nodeDeadline !== undefined && Date.now() >= nodeDeadline)) {
           return { terminal: 'failed', error };
         }
 
         const delay = computeRetryDelayMs(decision.retryPolicy, attempt);
         if (delay > 0) {
-          await sleep(delay);
+          await sleep(nodeDeadline === undefined ? delay : Math.min(delay, Math.max(0, nodeDeadline - Date.now())));
         }
         attempt++;
         continue;
@@ -983,7 +985,7 @@ class StorageBackedRunRunner implements RunRunner {
     return { kind: 'retry', retryPolicy };
   }
 
-  private async executeNodeAttempt(flow: FlowV3, node: NodeV3): Promise<NodeExecutionResult> {
+  private async executeNodeAttempt(flow: FlowV3, node: NodeV3, policy: NodePolicy, nodeDeadline?: number): Promise<NodeExecutionResult> {
     const def = this.env.plugins.getNode(node.kind);
     if (!def) {
       return {
@@ -1008,14 +1010,24 @@ class StorageBackedRunRunner implements RunRunner {
       };
     }
 
+    const attemptTimeoutMs = nodeDeadline === undefined ? policy.timeout?.ms : nodeDeadline - Date.now();
+    if (nodeDeadline !== undefined && attemptTimeoutMs! <= 0) {
+      return { status: 'failed', error: createRRError(RR_ERROR_CODES.TIMEOUT, `Node "${node.id}" timed out`) };
+    }
+
+    const attempt = attemptTimeoutMs && attemptTimeoutMs > 0 ? new AbortController() : undefined;
+    const execution = this.config.execution;
+    const deadlineAt = attempt && attemptTimeoutMs !== undefined
+      ? Math.min(Date.now() + attemptTimeoutMs, execution?.deadlineAt ?? Infinity)
+      : execution?.deadlineAt;
     const ctx: NodeExecutionContext = {
-      signal: this.cancellation.signal,
+      signal: attempt ? AbortSignal.any([this.cancellation.signal, attempt.signal]) : this.cancellation.signal,
       runId: this.runId,
       flow,
       nodeId: node.id,
       tabId: this.config.tabId,
       vars: this.state.vars,
-      execution: this.config.execution,
+      execution: attempt ? { ...execution, deadlineAt } : execution,
       log: (level, message, data) => {
         void this.queue
           .run(() =>
@@ -1044,17 +1056,15 @@ class StorageBackedRunRunner implements RunRunner {
       },
     };
 
-    const policy = this.resolveNodePolicy(flow, node);
-    const timeoutMs = policy.timeout?.ms;
-    const scope = policy.timeout?.scope ?? 'attempt';
-    const attemptTimeoutMs = scope === 'attempt' && timeoutMs !== undefined ? timeoutMs : undefined;
-
     try {
       const nodeWithConfig = { ...node, config: parsedConfig } as Parameters<typeof def.execute>[1];
+      ctx.signal?.throwIfAborted();
       const execPromise = def.execute(ctx, nodeWithConfig);
-      const result = await withTimeout(execPromise, attemptTimeoutMs, () =>
-        createRRError(RR_ERROR_CODES.TIMEOUT, `Node "${node.id}" timed out`),
-      );
+      const result = await withTimeout(execPromise, attemptTimeoutMs, () => {
+        const error = createRRError(RR_ERROR_CODES.TIMEOUT, `Node "${node.id}" timed out`);
+        attempt?.abort(error);
+        return error;
+      });
       return result;
     } catch (e) {
       return {

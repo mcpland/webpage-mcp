@@ -226,6 +226,7 @@ function createRunnerContext(
   runId: RunId,
   flow: FlowV3,
   options: {
+    execute?: NodeDefinition<'test', TestNodeConfig>['execute'];
     artifactService?: ArtifactService;
     execution?: RunRecordV3['execution'];
     args?: RunRecordV3['args'];
@@ -242,7 +243,8 @@ function createRunnerContext(
 } {
   const calls = new Map<string, number>();
   const plugins = new PluginRegistry();
-  plugins.registerNode(createTestNodeDefinition(calls));
+  const def = createTestNodeDefinition(calls);
+  plugins.registerNode({ ...def, execute: options.execute ?? def.execute });
 
   const bus = new InMemoryEventsBus();
   const { store: runs, byId: runsById } = createInMemoryRunsStore();
@@ -281,6 +283,27 @@ describe('V3 RunRunner onError contracts', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it.each(['attempt', 'node'] as const)('expires input according to its %s timeout scope', async scope => {
+    vi.useFakeTimers();
+    const flow = createFlow('click', [{ id: 'click', kind: 'test', config: { action: 'succeed' },
+      policy: { timeout: { ms: 40, scope }, retry: { retries: 1, intervalMs: 0 } } }], []);
+    const actions: number[] = [];
+    const deadlines: number[] = [];
+    const { runner } = createRunnerContext('timed-click', flow, {
+      execute: async (ctx) => {
+        deadlines.push(ctx.execution!.deadlineAt! - Date.now());
+        await new Promise(resolve => setTimeout(resolve, 120));
+        if (!ctx.signal?.aborted) actions.push(1);
+        return { status: 'succeeded' };
+      },
+    });
+    const run = runner.start();
+    await vi.runAllTimersAsync();
+    expect((await run).status).toBe('failed');
+    expect(deadlines).toEqual(scope === 'node' ? [40] : [40, 40]);
+    expect(actions).toEqual([]);
   });
 
   it('persists recordArgs instead of runtime args for secret-backed runs', async () => {
