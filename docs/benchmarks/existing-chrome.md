@@ -89,3 +89,29 @@ On November 24, 2026 (Shanghai), the two adapters each ran the 11 tasks five tim
 The cancellation scenario also passed five isolated Webpage MCP reruns. An earlier headful calibration run, before the final startup sequence was in place, left the fixture in a dragging state once. The formal result covers the recorded timing and does not establish cancellation reliability for every focus transition.
 
 The DevTools adapter's cross-origin fill returned an element-handle error in the chosen accessibility snapshot/fill path. Its cancellation trials still committed the release after the caller cancelled. Its normal tool catalog did not expose bookmark-folder lookup. Each result describes this version, adapter path, fixture and Chrome build. The raw counts are intended for regression tracking; they do not establish a market ranking.
+
+## After the four fixes
+
+On November 24, 2026 (Shanghai), the extension built from `cd771b6e` passed **55/55** trials, up from **35/55** on the published 0.11.0 extension, a gain of **36.4 percentage points**. Wrong-target writes fell from five to zero. Chrome reported zero unexpected tab activations in both runs. The two reports identify the same Chrome 153.0.8010.12 binary version, platform, Node version and npm server entry-point hashes. The extension manifest still reads 0.11.0. The worker hashes distinguish the two builds. [Published baseline](existing-chrome-0.11.0.json) · [Post-fix trials](existing-chrome-cd771b6e.json)
+
+Each cell gives passes out of five and the median duration in milliseconds for successful tasks. Durations include tool discovery calls within the task and fixture synchronization.
+
+| Task                                              |      Released 0.11.0 | Fixed extension | DevTools 1.13.0 on rerun |
+| ------------------------------------------------- | -------------------: | --------------: | -----------------------: |
+| Reject click on closed target                     | 0/5 · 5 wrong clicks |     5/5 · 14 ms |              5/5 · 55 ms |
+| Previously viewed background tab, duplicate title |       5/5 · 5,356 ms |    5/5 · 277 ms |             5/5 · 448 ms |
+| Never-active background tab                       |                  0/5 |    5/5 · 289 ms |             5/5 · 356 ms |
+| HTML HTTP 503, default capture                    |                  0/5 |    5/5 · 244 ms |             5/5 · 261 ms |
+| Unique bookmark folder name                       |                  0/5 |      5/5 · 4 ms |              Unsupported |
+| Switch tabs during an authenticated read          |         5/5 · 145 ms |    5/5 · 134 ms |             5/5 · 230 ms |
+| Fill a cross-origin frame                         |         5/5 · 792 ms |  5/5 · 1,027 ms |                      0/5 |
+| JSON HTTP 503, default capture                    |         5/5 · 248 ms |    5/5 · 243 ms |             5/5 · 259 ms |
+| HTML HTTP 503, detailed capture                   |         5/5 · 232 ms |    5/5 · 239 ms |             5/5 · 262 ms |
+| Cancel an in-flight press                         |       5/5 · 1,733 ms |  5/5 · 1,753 ms |                      0/5 |
+| Full bookmark path to authenticated portals       |          5/5 · 20 ms |     5/5 · 24 ms |              Unsupported |
+
+The previously viewed background-tab task used two MCP calls in both builds and took 94.8% less time after the fix. The DevTools control again had 35 passes, 10 failures and 10 unsupported trials. Those failures account for the combined runner's exit status of 1. All ten profiles initialized and both adapters completed all 55 trials.
+
+Cross-origin fill took 235 ms longer at the median in the complete suite. A follow-up ran only `--tasks cross-origin-frame --adapters webpage --headful --repeat 1` in five fresh-profile pairs, alternating which extension ran first. All ten fills passed. Release durations in pair order were 515, 1,076, 430, 1,374 and 1,110 ms (median 1,076 ms). Fixed-build durations were 1,344, 1,266, 1,340, 1,077 and 313 ms (median 1,266 ms). Both measurements warrant tracking fill latency. Five pairs with this spread leave the cause uncertain.
+
+To reproduce this comparison, build the shared package and extension at `cd771b6e` with `pnpm build:shared && pnpm build:extension`. In the published-run recipe above, set `BENCH_EXTENSION_DIR="$PWD/app/chrome-extension/.output/chrome-mv3"` and give the output a separate filename. Keep the pinned npm servers, browser, headful mode and five repetitions.
