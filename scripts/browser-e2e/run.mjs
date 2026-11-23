@@ -53,6 +53,28 @@ const scenarios = {
     assert.equal(run.json?.result, "Simple", run.text);
   },
 
+  async "cancel-captured-press"(t) {
+    const path = "/cancel-captured-press";
+    const tabId = await t.open(path);
+    const controller = new AbortController();
+    const pending = t.client.callTool(
+      { name: "chrome_click_element", arguments: { tabId, selector: "#slider" } },
+      undefined, { signal: controller.signal },
+    ).then(() => false, () => true);
+    try {
+      assert.ok(await t.pageLog(path, "pressed"));
+    } finally {
+      controller.abort();
+    }
+    assert.ok(await pending);
+    assert.ok(await t.pageLog(path, "cancelled"));
+    const next = await t.call("chrome_click_element", { tabId, selector: "#next" });
+    assert.ok(next.ok, next.text);
+    assert.deepEqual((await t.pageLog(path, "next"))?.data, {
+      dragging: false, committed: null, activations: 0,
+    });
+  },
+
   async "read-page-tree"(t) {
     const tabId = await t.open("/nested");
     const tree = await t.tree(tabId);

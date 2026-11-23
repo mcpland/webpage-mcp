@@ -29,6 +29,26 @@ const PAGES = {
 <p><a href="/form">More information...</a></p>`,
   ),
 
+  "/cancel-captured-press": page(
+    "Cancelled slider",
+    `<button id="slider">Slider</button><button id="next">Next</button>
+<script>
+  const slider = document.querySelector("#slider");
+  let dragging = false, committed = null, activations = 0;
+  slider.onpointerdown = event => { dragging = true; slider.setPointerCapture(event.pointerId); };
+  slider.onmousedown = () => {
+    __log("pressed", {});
+    const until = performance.now() + 1200;
+    while (performance.now() < until) {} // Cancel while Chrome is awaiting the press acknowledgement.
+  };
+  slider.onpointerup = event => { dragging = false; committed = event.clientX; };
+  slider.onpointercancel = () => { dragging = false; __log("cancelled", {}); };
+  slider.onclick = () => { activations++; };
+  document.querySelector("#next").onclick = () => __log("next", { dragging, committed, activations });
+</script>`,
+    LOGGER,
+  ),
+
   "/nested": page(
     "Nested",
     `<div class="card"><div class="card-body"><div class="card-title"><div>Quarterly revenue report</div></div></div></div>
