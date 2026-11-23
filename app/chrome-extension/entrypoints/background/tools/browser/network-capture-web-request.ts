@@ -574,8 +574,9 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
         ),
       );
 
-      // Secondary filtering based on MIME type
+      // An API may serve an HTML error page even when successful responses are JSON.
       if (
+        details.statusCode < 400 &&
         requestInfo.mimeType &&
         this.shouldFilterByMimeType(requestInfo.mimeType, captureInfo.includeStatic)
       ) {

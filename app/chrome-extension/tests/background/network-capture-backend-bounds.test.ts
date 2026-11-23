@@ -92,6 +92,27 @@ describe('network capture backend boundaries', () => {
     expect(networkCaptureStartTool.hasAvailableCapture()).toBe(false);
   });
 
+  it('keeps HTML HTTP failures while filtering successful HTML in default capture', async () => {
+    const { networkCaptureStartTool } = await import(
+      '@/entrypoints/background/tools/browser/network-capture-web-request'
+    );
+    await networkCaptureStartTool.execute({ tabId: 7 });
+    const before = vi.mocked(chrome.webRequest.onBeforeRequest.addListener).mock.calls[0][0];
+    const headers = vi.mocked(chrome.webRequest.onHeadersReceived.addListener).mock.calls[0][0];
+    for (const statusCode of [200, 404, 503]) {
+      const request = {
+        requestId: String(statusCode), tabId: 7, url: 'https://example.com/api',
+        method: 'GET', type: 'xmlhttprequest', timeStamp: Date.now(),
+      };
+      before(request as chrome.webRequest.WebRequestBodyDetails);
+      headers({ ...request, statusCode, statusLine: String(statusCode),
+        responseHeaders: [{ name: 'Content-Type', value: 'text/html; charset=utf-8' }],
+      } as chrome.webRequest.WebResponseHeadersDetails);
+    }
+    const result = await networkCaptureStartTool.stopCapture(7);
+    expect(result.data.requests.map((request: { status: number }) => request.status)).toEqual([404, 503]);
+  });
+
   it('does not recursively capture tabs past the lineage depth', async () => {
     const { networkCaptureStartTool } = await import(
       '@/entrypoints/background/tools/browser/network-capture-web-request'
