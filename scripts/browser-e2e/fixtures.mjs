@@ -31,18 +31,19 @@ const PAGES = {
 
   "/cancel-captured-press": page(
     "Cancelled slider",
-    `<button id="slider">Slider</button><button id="next">Next</button>
+    `<button id="slider">Slider</button><output id="owner"></output><button id="next">Next</button>
 <script>
   const slider = document.querySelector("#slider");
+  const owner = document.querySelector("#owner");
   let dragging = false, committed = null, activations = 0;
-  slider.onpointerdown = event => { dragging = true; slider.setPointerCapture(event.pointerId); };
+  slider.onpointerdown = event => { dragging = true; owner.setPointerCapture(event.pointerId); };
   slider.onmousedown = () => {
     __log("pressed", {});
     const until = performance.now() + 1200;
     while (performance.now() < until) {} // Cancel while Chrome is awaiting the press acknowledgement.
   };
-  slider.onpointerup = event => { dragging = false; committed = event.clientX; };
-  slider.onpointercancel = () => { dragging = false; __log("cancelled", {}); };
+  owner.onpointerup = event => { dragging = false; committed = event.clientX; };
+  owner.onpointercancel = () => { dragging = false; __log("cancelled", {}); };
   slider.onclick = () => { activations++; };
   document.querySelector("#next").onclick = () => __log("next", { dragging, committed, activations });
 </script>`,

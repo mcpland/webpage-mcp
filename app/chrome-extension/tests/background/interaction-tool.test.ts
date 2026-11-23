@@ -104,6 +104,13 @@ describe('interaction tools', () => {
       { signal: controller.signal });
     expect(result.isError).toBe(true);
     const releases = mocks.sendCommand.mock.calls.filter(call => call[2]?.type === 'mouseReleased' && call[2].clickCount === 0);
+    // Move outside the old document before releasing, even when its own window
+    // capture listener was registered before the extension.
+    const commands = mocks.sendCommand.mock.calls.filter(call => call[1] === 'Input.dispatchMouseEvent');
+    expect(commands.slice(-2).map(call => call[2])).toEqual([
+      expect.objectContaining({ type: 'mouseMoved', x: -1_000_000, y: -1_000_000, buttons: 0 }),
+      expect.objectContaining({ type: 'mouseReleased', button: 'none', buttons: 0 }),
+    ]);
     expect(releases).toHaveLength(1);
     expect(releases[0][2]).toMatchObject({ x: -1_000_000, y: -1_000_000, buttons: 0, clickCount: 0 });
     expect(releases[0][3].aborted).toBe(false);
@@ -177,6 +184,7 @@ describe('interaction tools', () => {
       'Input.dispatchMouseEvent',
       {
         type: 'mousePressed',
+        timestamp: expect.any(Number),
         x: 120,
         y: 260,
         button: 'left',
@@ -282,6 +290,7 @@ describe('interaction tools', () => {
       'Input.dispatchMouseEvent',
       {
         type: 'mousePressed',
+        timestamp: expect.any(Number),
         x: 220,
         y: 330,
         button: 'left',

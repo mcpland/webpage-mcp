@@ -4,8 +4,9 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { hasDisallowedPublicUrlScheme } from './common';
+import { readWithSignal } from '@/utils/read-with-signal';
 import { runInNativeMouseQueue } from '../../tab-queue';
-import { CANCEL_MOUSE_COORDINATE } from '@/utils/cancelled-mouse';
+import { CANCEL_MOUSE_COORDINATE, cancelObservedMousePress } from '@/utils/cancelled-mouse';
 import { inputSignal, withInputPermit, type BrowserInputContext } from '@/utils/browser-input';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
@@ -105,11 +106,12 @@ async function dispatchNativeClick(
         for (let index = 1; index <= clickCount; index += 1) {
           if (signal.aborted) return;
           const position = { x: Math.round(coordinates.x), y: Math.round(coordinates.y), button, modifiers };
+          const pressedAt = Date.now();
           let pressSent = false;
           let releaseSent = false;
           try {
             await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
-              ...position, type: 'mousePressed', buttons: buttonMask, clickCount: index,
+              ...position, type: 'mousePressed', buttons: buttonMask, clickCount: index, timestamp: pressedAt / 1000,
             }, signal, () => { pressSent = true; });
             signal.throwIfAborted();
             await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
@@ -117,10 +119,21 @@ async function dispatchNativeClick(
             }, signal, () => { releaseSent = true; });
           } finally {
             if (pressSent && !releaseSent && signal.aborted) {
-              // A cancelled acknowledgement can still represent a delivered press.
-              // The document-start observer suppresses activation at this reserved position.
+              // Cancel inside the pressed frame, then move outside before releasing.
+              // Chromium otherwise synthesizes a click on a capture owner even at an
+              // offscreen coordinate. A listener installed after page load cannot hide it.
+              await readWithSignal(() => chrome.scripting.executeScript({
+                target: { tabId, allFrames: true }, injectImmediately: true, world: 'ISOLATED',
+                func: cancelObservedMousePress, args: [pressedAt, button === 'right' ? 2 : button === 'middle' ? 1 : 0],
+              }), AbortSignal.timeout(1500)).catch(() => {});
               await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
-                x: CANCEL_MOUSE_COORDINATE, y: CANCEL_MOUSE_COORDINATE, button, modifiers,
+                type: 'mouseMoved', x: CANCEL_MOUSE_COORDINATE, y: CANCEL_MOUSE_COORDINATE,
+                button: 'none', buttons: 0, modifiers,
+              }, AbortSignal.timeout(1000)).catch(() => {});
+              await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+                // A left-button release can synthesize click even on the document
+                // itself. No button is being activated by this cleanup.
+                x: CANCEL_MOUSE_COORDINATE, y: CANCEL_MOUSE_COORDINATE, button: 'none', modifiers,
                 type: 'mouseReleased', buttons: 0, clickCount: 0,
               }, AbortSignal.timeout(1_000)).catch(() => {});
             }
