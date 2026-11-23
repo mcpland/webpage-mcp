@@ -1316,6 +1316,50 @@ describe('navigateTool', () => {
     }
   });
 
+  it.each(['back', 'forward', 'replaceState', 'different tab', 'older visit', 'pushState'])(
+    'requires an unambiguous local visit for a legacy opaque frame: %s', async scenario => {
+      vi.useFakeTimers();
+      const tabId = makeTab().id!;
+      const url = 'https://example.com/child';
+      const documentId = 'opaque';
+      const signal = new AbortController();
+      const event = () => {
+        const listeners = new Set<(...args: any[]) => void>();
+        return { addListener: (fn: (...args: any[]) => void) => listeners.add(fn),
+          removeListener: (fn: (...args: any[]) => void) => listeners.delete(fn),
+          emit: (...args: any[]) => listeners.forEach(fn => fn(...args)), listeners };
+      };
+      const state = event(), status = event(), visits = event();
+      const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockRejectedValue(new Error('Debugger busy'));
+      Object.assign(chrome, {
+        history: { onVisited: visits, getVisits: async () => [{ visitTime: scenario === 'older visit' ? 12 : 34,
+          isLocal: true, transition: scenario === 'pushState' ? 'manual_subframe' : 'auto_subframe' }] },
+        webNavigation: { onHistoryStateUpdated: state, getAllFrames: async () => [{ tabId, frameId: 9, documentId, url }] },
+        scripting: { executeScript: async ({ args }: { args: unknown[] }) => [{
+          frameId: 9, documentId, result: ['forward', 'back'].includes(String(args?.[0])) ? { lateCount: 0 } : 0,
+        }] },
+      });
+      Object.assign(chrome.tabs, { onUpdated: status });
+      const direction = scenario === 'forward' ? 'forward' : 'back';
+      (direction === 'back' ? mocks.tabsGoBack : mocks.tabsGoForward).mockImplementation(async () => {
+        status.emit(tabId, { status: 'loading' });
+        const details = { tabId, frameId: 9, documentId, url, transitionType: 'auto_subframe' };
+        state.emit(details);
+        if (scenario === 'different tab') state.emit({ ...details, tabId: tabId + 1 });
+        if (scenario !== 'replaceState') visits.emit({ url, lastVisitTime: 34 });
+        status.emit(tabId, { status: 'complete' });
+      });
+      const timer = setTimeout(() => signal.abort(), 700);
+      try {
+        const run = navigateTool.execute({ url: direction, waitUntil: 'commit' }, { signal: signal.signal });
+        await vi.advanceTimersByTimeAsync(750);
+        const result = await run;
+        expect(!!result.isError).toBe(!['back', 'forward'].includes(scenario));
+        expect([state, status, visits].every(e => !e.listeners.size)).toBe(true);
+      } finally { clearTimeout(timer); vi.useRealTimers(); history.mockRestore(); }
+    },
+  );
+
   it('reads joint history again when a child event arrives before a stale snapshot is delivered', async () => {
     const event = { addListener: vi.fn(), removeListener: vi.fn() };
     Object.assign(chrome, { webNavigation: {

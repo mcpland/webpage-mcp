@@ -1,3 +1,4 @@
+import { watchLegacyFrameVisits } from './legacy-history';
 import { inspectFrameHistory, watchConsumedPopstate, type FrameHistoryRead } from '@/utils/frame-history';
 import { readWithSignal } from '@/utils/read-with-signal';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
@@ -239,11 +240,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
   private async navigateHistory(
     tabId: number,
-    previousUrl: string,
+    originalTab: chrome.tabs.Tab,
     direction: 'back' | 'forward',
     waitUntil: NavigationWaitUntil,
     callerSignal?: AbortSignal,
   ): Promise<chrome.tabs.Tab> {
+    const previousUrl = String(originalTab.url || '');
     // Entries may share a URL, including pushState and full-document navigations.
     // Arm before calling goBack/goForward so a cached or same-document commit is observable.
     const timeoutMs = waitUntil === 'load' ? NAVIGATION_LOAD_TIMEOUT_MS : NAVIGATION_WAIT_TIMEOUT_MS;
@@ -310,6 +312,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         if (details.transitionQualifiers?.includes('forward_back')) childTraversed = true;
       }
     };
+    let visitedLegacyFrame: ((documentId: string) => boolean) | undefined;
     const checkUpdatedFrames = (frames: number[]) => {
       for (const frameId of frames) {
         if (readingFrames.has(frameId)) {
@@ -330,7 +333,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
               if (previous.result.includes(entry[0])) childTraversed = true;
             } else if (typeof entry === 'number' && typeof previous?.result === 'number' &&
               current?.documentId && current.documentId === previous.documentId && traversingDocuments.has(current.documentId)) {
-              if (entry > previous.result || legacyDocuments.get(current.documentId)) childTraversed = true;
+              if (entry > previous.result || legacyDocuments.get(current.documentId) || visitedLegacyFrame?.(current.documentId)) childTraversed = true;
               else updatedFrames.add(frameId); // popstate may follow the browser event.
             }
           }).finally(() => readingFrames.delete(frameId));
@@ -340,6 +343,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
     for (const event of events) event?.addListener(onCommit);
     try {
       signal.throwIfAborted();
+      if (!originalTab.incognito && (!before || legacyDocuments.size)) {
+        visitedLegacyFrame = watchLegacyFrameVisits(tabId, frames ?? [], legacyDocuments, frameSignal);
+      }
       if (direction === 'back') await chrome.tabs.goBack(tabId);
       else await chrome.tabs.goForward(tabId);
 
@@ -688,8 +694,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           focusWindow: background !== true,
         });
 
-        const urlBeforeHistory = String(targetTab.url || '');
-        const updatedTab = await this.navigateHistory(targetTab.id, urlBeforeHistory, url, waitUntil, signal);
+        const updatedTab = await this.navigateHistory(targetTab.id, targetTab, url, waitUntil, signal);
         if (hasDisallowedPublicUrlScheme(String(updatedTab.url || ''))) {
           return createErrorResponse(getNavigateTargetPageError('history'));
         }
