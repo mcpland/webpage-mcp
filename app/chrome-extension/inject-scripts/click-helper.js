@@ -299,23 +299,42 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
 
   async function dispatchClickSequence(element, x, y, options, isDouble) {
     const base = normalizeMouseOpts(x, y, options);
-    const dispatch = async (type) => {
+    const checkInput = async () => {
       if (options.permit && await chrome.runtime.sendMessage({
         action: 'checkBrowserInput', permit: options.permit,
       }) !== true) throw new Error('Click cancelled');
       if (Date.now() >= options.deadlineAt) throw new Error('Workflow click timed out');
-      element.dispatchEvent(new MouseEvent(type, base));
     };
-    await dispatch('mousedown');
-    await dispatch('mouseup');
-    await dispatch('click');
-    if (base.button === 2) await dispatch('contextmenu');
+    const dispatch = (type) => element.dispatchEvent(new MouseEvent(type, {
+      ...base, buttons: type === 'mousedown' ? base.buttons : 0,
+    }));
+    const click = async () => {
+      await checkInput();
+      dispatch('mousedown');
+      try {
+        await checkInput();
+      } catch (error) {
+        // Balance only the press already delivered to this element. A synthetic
+        // mouseup does not synthesize a click. Suppress its default action as well.
+        const release = new MouseEvent('mouseup', { ...base, buttons: 0, cancelable: true });
+        release.preventDefault();
+        element.dispatchEvent(release);
+        throw error;
+      }
+      dispatch('mouseup');
+      await checkInput();
+      dispatch('click');
+    };
+    await click();
+    if (base.button === 2) {
+      await checkInput();
+      dispatch('contextmenu');
+    }
     if (isDouble) {
       await new Promise(resolve => setTimeout(resolve, 30));
-      await dispatch('mousedown');
-      await dispatch('mouseup');
-      await dispatch('click');
-      await dispatch('dblclick');
+      await click();
+      await checkInput();
+      dispatch('dblclick');
     }
   }
 

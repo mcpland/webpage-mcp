@@ -100,7 +100,10 @@ describe('click-helper bounded text summaries', () => {
     mockMouseEvent();
     const now = Date.now();
     let allowed = true;
-    button.onmousedown = () => { allowed = false; };
+    let pressed = false;
+    const releases: boolean[] = [];
+    button.onmousedown = () => { allowed = false; pressed = true; };
+    button.onmouseup = event => { pressed = false; releases.push(event.defaultPrevented); };
     vi.spyOn(Date, 'now').mockImplementation(() => allowed ? now : now + 100);
     vi.mocked(chrome.runtime.sendMessage).mockImplementation(async () => allowed);
     const result = await dispatch(loadHelper(), {
@@ -108,6 +111,8 @@ describe('click-helper bounded text summaries', () => {
       ...(reason === 'timeout' ? { deadlineAt: now + 50 } : { permit: 'test' }),
     });
     expect(result.error).toMatch(/timed out|cancelled/);
+    expect(pressed).toBe(false);
+    expect(releases).toEqual([true]);
     expect(clicked).not.toHaveBeenCalled();
   });
 
