@@ -2911,12 +2911,12 @@
     },
     {
       "name": "tar-fs",
-      "version": "2.1.5",
-      "resolved": "https://registry.npmjs.org/tar-fs/-/tar-fs-2.1.5.tgz",
-      "integrity": "sha512-OboTd8mmMhZDNPV+UjQcK9yKAatXu2aJ+r1w4im1Otd4M4fl2hwvdoXUxIYHFTHWK/3y3FarBP70v3vwmGlOxw==",
+      "version": "2.1.6",
+      "resolved": "https://registry.npmjs.org/tar-fs/-/tar-fs-2.1.6.tgz",
+      "integrity": "sha512-vsdruOmnweDIXJXWpfc5aszWMVOj6qFI+dXxNuprh6Kt+WrGJh1MQL/2xYUEzI3EX86o9b2Rop8ziIF5Ol/UoQ==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "e67abc8620e8c93860c69d522ffba271a045f6271bc689fdfe400d8d1f14b749",
+      "packageJsonSha256": "b769be58282ad84903b5fcc8d6d24b4483718cf8d3239e76e7b90630c88e1917",
       "licenseEvidence": [
         {
           "path": "LICENSE",
