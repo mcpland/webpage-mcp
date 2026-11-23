@@ -1,4 +1,4 @@
-import { inspectFrameHistory } from '@/utils/frame-history';
+import { inspectFrameHistory, watchConsumedPopstate } from '@/utils/frame-history';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -1165,6 +1165,35 @@ describe('navigateTool', () => {
       if (stopped) break;
     }
     expect(pageHandler).toHaveBeenCalledOnce();
+    expect(inspectFrameHistory('current')).toBe(1);
+  });
+
+  it('observes a consumed legacy popstate only while trusted and restores the original method', async () => {
+    const nativeStop = vi.fn();
+    class BaseEvent { stopImmediatePropagation = nativeStop; }
+    Object.defineProperty(BaseEvent.prototype, 'stopImmediatePropagation', { value: nativeStop });
+    class LegacyPopState extends BaseEvent {}
+    const frame = { PopStateEvent: LegacyPopState, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    vi.stubGlobal('window', frame);
+    const previous = watchConsumedPopstate('previous', 1000);
+    const observed = watchConsumedPopstate('stop', 1000);
+    frame.addEventListener.mock.calls[0][1]();
+    expect(await previous).toBe(false);
+    const stop = LegacyPopState.prototype.stopImmediatePropagation;
+    const event = { type: 'popstate', target: frame, eventPhase: 2, isTrusted: false };
+    stop.call(event);
+    expect(Object.hasOwn(LegacyPopState.prototype, 'stopImmediatePropagation')).toBe(true);
+    stop.call({ ...event, isTrusted: true });
+    await expect(observed).resolves.toBe(true);
+    expect(nativeStop).toHaveBeenCalledTimes(2);
+    expect(Object.hasOwn(LegacyPopState.prototype, 'stopImmediatePropagation')).toBe(false);
+  });
+
+  it('detects an observer installed after document start without exposing history state', () => {
+    const addEventListener = vi.fn();
+    vi.stubGlobal('window', { top: {}, navigation: { currentEntry: null }, addEventListener });
+    expect(inspectFrameHistory('back')).toEqual({ lateCount: 0 });
+    addEventListener.mock.calls[0][1]({ isTrusted: true });
     expect(inspectFrameHistory('current')).toBe(1);
   });
 

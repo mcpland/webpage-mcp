@@ -1,4 +1,4 @@
-import { inspectFrameHistory, type FrameHistoryRead } from '@/utils/frame-history';
+import { inspectFrameHistory, watchConsumedPopstate, type FrameHistoryRead } from '@/utils/frame-history';
 import { readWithSignal } from '@/utils/read-with-signal';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
@@ -257,8 +257,30 @@ class NavigateTool extends BaseBrowserToolExecutor {
       : null;
     const frameReads = new AbortController();
     const frameSignal = AbortSignal.any([frameReads.signal, signal]);
+    const legacyDocuments = new Map<string, boolean>();
+    const stopEvent = `webpage-mcp-history-${crypto.randomUUID()}`;
+    const baselineFor = async (frameId: number) => {
+      const entry = await readFrameHistory(tabId, frameId, direction, frameSignal);
+      const result = entry?.result;
+      if (!entry?.documentId || !result || typeof result !== 'object' || !('lateCount' in result)) return entry;
+      const documentId = entry.documentId;
+      frameSignal.throwIfAborted();
+      const target = { tabId, documentIds: [documentId] };
+      legacyDocuments.set(documentId, false);
+      void chrome.scripting.executeScript({
+        target, world: 'MAIN', injectImmediately: true, func: watchConsumedPopstate,
+        args: [stopEvent, Math.max(1, deadline - Date.now())],
+      }).then(results => {
+        if (results.some(r => r.documentId === documentId && r.result === true)) legacyDocuments.set(documentId, true);
+      }).catch(() => {});
+      // Wait for the installation task, not the later event it is observing.
+      await readWithSignal(() => chrome.scripting.executeScript({
+        target, world: 'MAIN', injectImmediately: true, func: () => true,
+      }), frameSignal).catch(() => undefined);
+      return { ...entry, result: result.lateCount };
+    };
     const baselines = new Map((frames ?? []).filter(frame => frame.frameId !== 0).map(({ frameId }) =>
-      [frameId, readFrameHistory(tabId, frameId, direction, frameSignal)] as const));
+      [frameId, baselineFor(frameId).catch(() => undefined)] as const));
     // Give the renderer a head start without holding a top-level traversal behind
     // a dialog. Keep each outstanding read for a later event from that frame.
     const [before] = baselines.size ? await Promise.all([
@@ -308,7 +330,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
               if (previous.result.includes(entry[0])) childTraversed = true;
             } else if (typeof entry === 'number' && typeof previous?.result === 'number' &&
               current?.documentId && current.documentId === previous.documentId && traversingDocuments.has(current.documentId)) {
-              if (entry > previous.result) childTraversed = true;
+              if (entry > previous.result || legacyDocuments.get(current.documentId)) childTraversed = true;
               else updatedFrames.add(frameId); // popstate may follow the browser event.
             }
           }).finally(() => readingFrames.delete(frameId));
@@ -357,6 +379,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
       }
     } finally {
       frameReads.abort();
+      for (const documentId of legacyDocuments.keys()) {
+        void chrome.scripting.executeScript({
+          target: { tabId, documentIds: [documentId] }, world: 'MAIN', injectImmediately: true,
+          func: (event: string) => { window.dispatchEvent(new Event(event)); }, args: [stopEvent],
+        }).catch(() => {});
+      }
       for (const event of events) event?.removeListener(onCommit);
     }
   }
