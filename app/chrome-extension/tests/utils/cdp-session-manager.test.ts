@@ -87,6 +87,20 @@ function createDebuggerHarness(tabId = 41) {
 }
 
 describe("CDPSessionManager", () => {
+  it("distinguishes the session that registered a preload from a later attachment", async () => {
+    const { manager } = createDebuggerHarness();
+    await manager.attach(41, "other owner");
+    const isOriginal = await manager.withSession(41, "temporary owner", async current => current);
+    expect(isOriginal()).toBe(true);
+    await manager.detach(41, "other owner");
+    expect(isOriginal()).toBe(false);
+    await manager.withSession(41, "next attachment", async current => {
+      expect(current()).toBe(true);
+      expect(isOriginal()).toBe(false);
+    });
+    manager.dispose();
+  });
+
   it("unregisters its detach listener when disposed", () => {
     const { api, manager } = createDebuggerHarness();
 

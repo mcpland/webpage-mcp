@@ -195,7 +195,7 @@ export async function stopChrome(child, timeoutMs = 10_000) {
   }
 }
 
-async function cdpConnect(webSocketUrl) {
+export async function cdpConnect(webSocketUrl) {
   const socket = new globalThis.WebSocket(webSocketUrl);
   await new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve, { once: true });

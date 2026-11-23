@@ -16,6 +16,7 @@ import { clearTimeout, setTimeout } from "node:timers";
 import { startFixtureServer } from "./fixtures.mjs";
 import {
   callTool,
+  cdpConnect,
   connectMcpClient,
   connectNativeHost,
   findRef,
@@ -77,22 +78,87 @@ const scenarios = {
 
   async "cancel-key-chord"(t) {
     const path = "/cancel-key-chord";
-    const tabId = await t.open(path);
+    for (const [mode, trusted] of [
+      ["stable", [true, true, true]], ["down", [false, false, false]], ["up", [true, false, false]],
+    ]) {
+      const tabId = await t.open(path + "?" + mode);
+      const controller = new AbortController();
+      const pending = t.client.callTool(
+        { name: "chrome_keyboard", arguments: { tabId, keys: "Ctrl+Shift+A, B" } },
+        undefined, { signal: controller.signal },
+      ).then(() => false, () => true);
+      const matchesMode = data => data.mode === mode;
+      try {
+        assert.ok(await t.pageLog(path, "pressed", matchesMode));
+      } finally {
+        controller.abort();
+      }
+      assert.ok(await pending);
+      assert.deepEqual((await t.pageLog(path, "released", matchesMode))?.data, {
+        events: ["down:ControlLeft", "down:ShiftLeft", "down:KeyA", "up:KeyA", "up:ShiftLeft", "up:ControlLeft"],
+        childKeys: [], trusted, mode,
+      });
+    }
+  },
+
+  async "cancel-key-cross-site"(t) {
+    const tabId = await t.open("/cancel-key-chord?cross-site");
+    const child = new URL("/key-release-child", t.base);
+    child.hostname = "localhost";
+    const targets = await (await globalThis.fetch(`http://127.0.0.1:${t.chromePort}/json/list`)).json();
+    const worker = await cdpConnect(targets.find(target => target.type === "service_worker" &&
+      target.url.startsWith(`chrome-extension://${t.env.extensionId}/`)).webSocketDebuggerUrl);
+    // Move focus after Chrome's frame inventory, immediately before the first native up.
+    function interruptRelease(tabId, childUrl) {
+      const send = chrome.debugger.sendCommand;
+      globalThis.restoreReleaseRace = () => {
+        chrome.debugger.sendCommand = send;
+        delete globalThis.restoreReleaseRace;
+      };
+      chrome.debugger.sendCommand = async function (target, method, params) {
+        if (target.tabId === tabId && method === "Input.dispatchKeyEvent" && params.type === "keyUp") {
+          globalThis.restoreReleaseRace();
+          await chrome.scripting.executeScript({
+            target: { tabId }, world: "MAIN", args: [childUrl], func: url => new Promise(resolve => {
+              const frame = document.createElement("iframe");
+              const ready = event => {
+                if (event.source !== frame.contentWindow || event.data !== "key-release-ready") return;
+                window.removeEventListener("message", ready);
+                resolve(true);
+              };
+              window.addEventListener("message", ready);
+              frame.onload = () => { frame.focus(); frame.contentWindow.postMessage("focus", new URL(url).origin); };
+              frame.src = url;
+              document.body.append(frame);
+            }),
+          });
+        }
+        return send.call(this, target, method, params);
+      };
+    }
     const controller = new AbortController();
-    const pending = t.client.callTool(
-      { name: "chrome_keyboard", arguments: { tabId, keys: "Ctrl+Shift+A, B" } },
-      undefined, { signal: controller.signal },
-    ).then(() => false, () => true);
     try {
-      assert.ok(await t.pageLog(path, "pressed"));
+      const install = await worker.send("Runtime.evaluate", {
+        expression: `(${interruptRelease.toString()})(${tabId}, ${JSON.stringify(child.href)})`,
+      });
+      assert.ok(!install.exceptionDetails);
+      const pending = t.client.callTool({ name: "chrome_keyboard", arguments: { tabId, keys: "Ctrl+A" } },
+        undefined, { signal: controller.signal }).then(() => false, () => true);
+      const inParent = data => data.mode === "cross-site";
+      assert.ok(await t.pageLog("/cancel-key-chord", "pressed", inParent));
+      controller.abort();
+      assert.ok(await pending);
+      assert.ok(await t.pageLog("/cancel-key-chord", "released", inParent));
+      const next = await t.call("chrome_keyboard", { tabId, keys: "Shift" });
+      assert.ok(next.ok, next.text);
+      assert.ok(await t.pageLog(child.pathname, "up", data => data.code === "ShiftLeft"));
+      assert.deepEqual(t.fixtures.logs.filter(entry => entry.page === child.pathname && entry.type === "up")
+        .map(entry => entry.data), [{ code: "ShiftLeft", trusted: true }]);
     } finally {
       controller.abort();
+      try { await worker.send("Runtime.evaluate", { expression: "globalThis.restoreReleaseRace?.()" }); }
+      finally { worker.close(); }
     }
-    assert.ok(await pending);
-    assert.deepEqual((await t.pageLog(path, "released"))?.data, {
-      events: ["down:ControlLeft", "down:ShiftLeft", "down:KeyA", "up:KeyA", "up:ShiftLeft", "up:ControlLeft"],
-      childKeys: [],
-    });
   },
 
   async "read-page-tree"(t) {

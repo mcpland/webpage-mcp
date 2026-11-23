@@ -55,20 +55,37 @@ const PAGES = {
     `<input autofocus><iframe id="other" srcdoc="<input>"></iframe><script>
   const events = [];
   const childKeys = [];
+  const trusted = [];
+  const mode = location.search.slice(1);
   other.onload = () => other.contentDocument.onkeyup = event => childKeys.push(event.code);
   document.onkeydown = event => {
     events.push("down:" + event.code);
     if (event.code === "KeyA") {
-      other.contentDocument.querySelector("input").focus();
-      __log("pressed", {});
+      if (mode === "down") other.contentDocument.querySelector("input").focus();
+      __log("pressed", { mode });
       const until = performance.now() + 3300;
       while (performance.now() < until) {}
     }
   };
   document.onkeyup = event => {
+    trusted.push(event.isTrusted);
     events.push("up:" + event.code);
-    if (event.key === "Control") __log("released", { events, childKeys });
+    if (event.code === "KeyA" && mode === "up") other.contentDocument.querySelector("input").focus();
+    if (event.key === "Control") __log("released", { events, childKeys, trusted, mode });
   };
+</script>`,
+    LOGGER,
+  ),
+
+  "/key-release-child": page(
+    "Key release destination",
+    `<input><script>
+  window.onmessage = event => {
+    if (event.source !== parent) return;
+    document.querySelector("input").focus();
+    parent.postMessage("key-release-ready", event.origin);
+  };
+  window.onkeyup = event => __log("up", { code: event.code, trusted: event.isTrusted });
 </script>`,
     LOGGER,
   ),

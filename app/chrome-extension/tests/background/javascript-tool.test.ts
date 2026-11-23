@@ -29,7 +29,7 @@ function payloadOf(result: Awaited<ReturnType<typeof javascriptTool.execute>>) {
 
 function mockCdpCommands(envelope: unknown) {
   vi.spyOn(cdpSessionManager, "withSession").mockImplementation(
-    async (_tabId, _owner, operation) => operation(),
+    async (_tabId, _owner, operation) => operation(() => true),
   );
   return vi
     .spyOn(cdpSessionManager, "sendCommand")
@@ -237,7 +237,7 @@ describe("javascriptTool", () => {
   it("releases the remote holder when page serialization throws", async () => {
     vi.spyOn(javascriptTool as any, "tryGetTab").mockResolvedValue(makeTab());
     vi.spyOn(cdpSessionManager, "withSession").mockImplementation(
-      async (_tabId, _owner, operation) => operation(),
+      async (_tabId, _owner, operation) => operation(() => true),
     );
     const sendCommand = vi
       .spyOn(cdpSessionManager, "sendCommand")

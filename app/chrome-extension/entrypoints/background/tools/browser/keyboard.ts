@@ -9,6 +9,7 @@ import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { runInNativeKeyQueue } from '../../tab-queue';
 import { readWithSignal } from '@/utils/read-with-signal';
 import { trackChord, type PendingKeyRelease } from '@/utils/cancelled-keys';
+import { releaseFocusedKeys, type NativeKeyRelease } from '@/utils/cdp-key-release';
 import { dispatchKeyStroke, MODIFIER_KEYS, modifierBitForKey, parseKeyboardInput, type KeyboardStep, type KeyStroke } from '@/utils/cdp-keyboard';
 import {
   CdpUnavailableError,
@@ -60,7 +61,7 @@ async function dispatchNativeStroke(
     target: { tabId, allFrames: true }, world: 'ISOLATED', injectImmediately: true,
     func: trackChord, args: [token, codes, releases],
   });
-  const releases = new Map<string, PendingKeyRelease>();
+  const releases = new Map<string, NativeKeyRelease>();
   try {
     // A stalled sibling must not prevent a chord from reaching the focused document.
     await readWithSignal(() => track(null), AbortSignal.any([callerSignal, AbortSignal.timeout(250)]))
@@ -71,16 +72,18 @@ async function dispatchNativeStroke(
       return cdpSessionManager.sendCommand(tabId, method, { ...event, timestamp: timestamp / 1000 }, callerSignal, () => {
         if (event.type === 'keyUp') releases.delete(code);
         else releases.set(code, {
-          code, timestamp, modifiers: Number(event.modifiers) & ~modifierBitForKey(String(event.key)),
+          code, timestamp, key: String(event.key), location: Number(event.location ?? 0),
+          windowsVirtualKeyCode: Number(event.windowsVirtualKeyCode), modifiers: Number(event.modifiers) & ~modifierBitForKey(String(event.key)),
         });
       });
     }, stroke, { signal });
   } finally {
-    // Native keyUp is routed to current focus, which may have moved during keydown.
-    // Each original document balances only the downs it actually received.
-    const close = async () => track([...releases.values()].reverse());
-    if (releases.size) await readWithSignal(close, AbortSignal.timeout(1500)).catch(() => {});
-    else void close().catch(() => {});
+    const pending = [...releases.values()].reverse();
+    if (pending.length) {
+      await releaseFocusedKeys(tabId, token, pending).catch(() => {});
+      // Finish in the original document for downs that never received an authorized native up.
+      await readWithSignal(() => track(pending), AbortSignal.timeout(1500)).catch(() => {});
+    } else void track([]).catch(() => {});
   }
 }
 

@@ -283,11 +283,12 @@ export class CDPSessionManager {
   async withSession<T>(
     tabId: number,
     owner: OwnerTag,
-    fn: () => Promise<T>,
+    fn: (sameSession: () => boolean) => Promise<T>,
   ): Promise<T> {
     await this.attach(tabId, owner);
+    const session = this.getState(tabId);
     try {
-      return await fn();
+      return await fn(() => !!session && this.getState(tabId) === session);
     } finally {
       await this.detach(tabId, owner);
     }

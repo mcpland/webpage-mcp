@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  withSession: vi.fn(),
   attach: vi.fn(),
   detach: vi.fn(),
   sendCommand: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/utils/cdp-session-manager', () => ({
   cdpSessionManager: {
+    withSession: mocks.withSession,
     attach: mocks.attach,
     detach: mocks.detach,
     sendCommand: mocks.sendCommand,
@@ -34,6 +36,7 @@ function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
 describe('keyboardTool', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    mocks.withSession.mockReset();
     mocks.attach.mockReset();
     mocks.detach.mockReset();
     mocks.sendCommand.mockReset();
@@ -65,6 +68,59 @@ describe('keyboardTool', () => {
       ? [['ShiftLeft', 2], ['ControlLeft', 0]] : phase === 'primary'
       ? [['KeyA', 10], ['ShiftLeft', 2], ['ControlLeft', 0]] : []);
     if (phase !== 'completed') expect(mocks.sendCommand.mock.calls.some(([, , e]) => e.type === 'keyUp')).toBe(false);
+  });
+
+  it.each(['registration', 'native release'])('handles cancellation while awaiting %s', async phase => {
+    const controller = new AbortController();
+    let notifyNavigation!: (event: { tabId: number }) => void;
+    const onBeforeNavigate = {
+      addListener: (listener: typeof notifyNavigation) => { notifyNavigation = listener; },
+      removeListener: vi.fn(),
+    };
+    let resolveReply!: (value: { identifier: string }) => void;
+    const delayed = new Promise(resolve => { resolveReply = resolve; });
+    const delayedMethod = phase === 'registration' ? 'Page.addScriptToEvaluateOnNewDocument' : 'Input.dispatchKeyEvent';
+    const sendCommand = vi.fn(async (_target, method) => method === delayedMethod ? delayed : { identifier: 'preload' });
+    const finish = vi.fn();
+    const executeScript = vi.fn(async request => {
+      if (request.func.name === 'prepareNativeKeyRelease') return [{ documentId: 'original', result: 'focused' }];
+      if (Array.isArray(request.args[2])) finish(structuredClone(request.args[2]));
+      return [];
+    });
+    vi.stubGlobal('chrome', {
+      debugger: { sendCommand, onDetach: { addListener: vi.fn(), removeListener: vi.fn() },
+        onEvent: { addListener: vi.fn(), removeListener: vi.fn() } },
+      scripting: { executeScript },
+      webNavigation: { getAllFrames: async () => [{ documentId: 'original' }], onBeforeNavigate },
+    });
+    const releaseLease = vi.fn();
+    const sameSession = vi.fn(() => true);
+    mocks.withSession.mockImplementation(async (_tab, _owner, operation) => {
+      try { return await operation(sameSession); } finally { releaseLease(); }
+    });
+    mocks.sendCommand.mockImplementation(async (_tab, _method, event, _signal, submitted) => {
+      submitted();
+      if (event.code === 'KeyA') { controller.abort(); throw controller.signal.reason; }
+    });
+    const chord = dispatchKeySequence(7, 'Ctrl+A', 0, controller.signal, controller.signal);
+    const cancelled = expect(chord).rejects.toThrow();
+    await vi.waitFor(() => expect(sendCommand.mock.calls.some(([, method]) => method === delayedMethod)).toBe(true));
+    notifyNavigation({ tabId: 7 });
+    await cancelled;
+    expect(finish.mock.calls[0][0].map((key: { code: string }) => key.code)).toEqual(['KeyA', 'ControlLeft']);
+    if (phase === 'registration') {
+      expect(releaseLease).toHaveBeenCalledOnce();
+      expect(finish.mock.calls[0][0][0].awaitingNativeAck).toBeUndefined();
+    } else {
+      expect(releaseLease).not.toHaveBeenCalled();
+      expect(finish.mock.calls[0][0][0].awaitingNativeAck).toBe(true);
+    }
+    resolveReply({ identifier: 'preload' });
+    await vi.waitFor(() => expect(sendCommand).toHaveBeenCalledWith({ tabId: 7 },
+      'Page.removeScriptToEvaluateOnNewDocument', { identifier: 'preload' }));
+    expect(releaseLease).toHaveBeenCalledOnce();
+    expect(sendCommand.mock.calls.filter(([, method]) => method === 'Input.dispatchKeyEvent'))
+      .toHaveLength(phase === 'registration' ? 0 : 1);
   });
 
   it('rejects expensive selectors before helper injection', async () => {
