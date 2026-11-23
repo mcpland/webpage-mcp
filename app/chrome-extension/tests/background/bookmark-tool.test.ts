@@ -10,7 +10,14 @@ import {
   bookmarkDeleteTool,
   bookmarkSearchTool,
 } from '@/entrypoints/background/tools/browser/bookmark';
+import type { ToolResult } from '@/common/tool-handler';
 import { measureUtf8Bytes } from '@/entrypoints/background/tools/browser/bounded-tool-output';
+
+function resultText(result: ToolResult): string {
+  const [content] = result.content;
+  if (content?.type !== 'text') throw new Error('Expected a text tool result');
+  return content.text;
+}
 
 describe('bookmark tools', () => {
   beforeEach(() => {
@@ -132,6 +139,51 @@ describe('bookmark tools', () => {
     expect(folderResult.isError).toBe(true);
     expect(chrome.bookmarks.get).not.toHaveBeenCalled();
     expect(chrome.bookmarks.getChildren).not.toHaveBeenCalled();
+  });
+
+  it('resolves a unique nested folder and refuses ambiguous reads and writes', async () => {
+    const tree: Record<string, Pick<chrome.bookmarks.BookmarkTreeNode, 'id' | 'title' | 'url'>[]> = {
+      '0': [{ id: '1', title: '收藏夹栏' }, { id: '2', title: '其他收藏夹' }],
+      '1': [{ id: '3', title: 'Work' }],
+      '3': [{ id: '4', title: 'Projects' }],
+      '4': [{ id: '5', title: 'Projects', url: 'https://example.com' }],
+      '2': [],
+    };
+    (chrome.bookmarks.get as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (chrome.bookmarks.getChildren as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => tree[id] ?? []);
+    const result = await bookmarkSearchTool.execute({ folderPath: 'projects' });
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(resultText(result)).bookmarks).toMatchObject([{ id: '5' }]);
+
+    tree['2'].push({ id: '6', title: 'PROJECTS' });
+    const ambiguous = await bookmarkSearchTool.execute({ folderPath: 'Projects' });
+    const add = await bookmarkAddTool.execute({
+      parentId: 'Projects', url: 'https://example.com', createFolder: true,
+    });
+    for (const rejected of [ambiguous, add]) {
+      expect(rejected.isError).toBe(true);
+      expect(resultText(rejected)).toContain('Use the full path or folder ID');
+    }
+    expect(chrome.bookmarks.create).not.toHaveBeenCalled();
+    const qualified = await bookmarkSearchTool.execute({ folderPath: '收藏夹栏/Work/Projects' });
+    expect(qualified.isError).toBe(false);
+    expect(JSON.parse(resultText(qualified)).bookmarks).toMatchObject([{ id: '5' }]);
+  });
+
+  it('rejects a partial name match if the scan cannot establish uniqueness', async () => {
+    (chrome.bookmarks.get as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (chrome.bookmarks.getChildren as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', title: 'Work' },
+      ...Array.from({ length: BOOKMARK_SEARCH_MAX_SCAN_NODES }, () => ({
+        id: '2', title: 'Link', url: 'https://example.com',
+      })),
+    ]);
+    const result = await bookmarkAddTool.execute({
+      parentId: 'Work', url: 'https://example.com', createFolder: true,
+    });
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('scan limit');
+    expect(chrome.bookmarks.create).not.toHaveBeenCalled();
   });
 
   it('rejects non-public URLs when adding bookmarks', async () => {

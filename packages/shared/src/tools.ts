@@ -1989,7 +1989,7 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: "string",
           maxLength: 2048,
           description:
-            'Optional folder path or ID to limit search to a specific bookmark folder. Can be a path string (e.g., "Work/Projects") or a folder ID.',
+            'Limit the search to a folder by ID, unique folder name, or full path (e.g., "Bookmarks bar/Work/Projects").',
         },
       },
       required: [],
@@ -2014,7 +2014,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         parentId: {
           type: "string",
           description:
-            'Parent folder path or ID to add the bookmark to. Can be a path string (e.g., "Work/Projects") or a folder ID. If not provided, adds to the "Bookmarks Bar" folder.',
+            'Parent folder ID, unique folder name, or full path (e.g., "Bookmarks bar/Work/Projects"). Defaults to the Bookmarks Bar.',
         },
         createFolder: {
           type: "boolean",

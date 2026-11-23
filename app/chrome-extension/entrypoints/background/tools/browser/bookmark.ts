@@ -120,13 +120,44 @@ async function getBookmarkFolderPath(bookmarkNodeId: string): Promise<string> {
   return truncateJsonString(pathParts.join(' > '), BOOKMARK_MAX_PATH_JSON_BYTES);
 }
 
-/**
- * Find bookmark folder by ID or path string
- * If it's an ID, validate it
- * If it's a path string, try to parse it
- * @param pathOrId Path string (e.g., "Work/Projects") or folder ID
- * @returns Returns folder node, or null if not found
- */
+async function findUniqueFolderByName(
+  name: string,
+  budget: BookmarkScanBudget = { scannedNodes: 0, truncated: false },
+): Promise<chrome.bookmarks.BookmarkTreeNode | null> {
+  const wanted = name.toLowerCase();
+  const folders = [{ id: '0', depth: 0 }];
+  let match: chrome.bookmarks.BookmarkTreeNode | null = null;
+  const limitMessage = 'Folder name lookup reached the scan limit. Use the full path or folder ID.';
+  for (let i = 0; i < folders.length; i++) {
+    const parent = folders[i];
+    const children = await chrome.bookmarks.getChildren(parent.id);
+    for (const child of children) {
+      if (budget.scannedNodes >= BOOKMARK_SEARCH_MAX_SCAN_NODES) throw new Error(limitMessage);
+      budget.scannedNodes++;
+      if (child.url) continue;
+      if (
+        child.title.length <= BOOKMARK_MAX_TITLE_JSON_BYTES &&
+        child.title.toLowerCase() === wanted
+      ) {
+        if (match) {
+          throw new Error('Multiple bookmark folders have this name. Use the full path or folder ID.');
+        }
+        match = child;
+      }
+      if (
+        parent.depth >= BOOKMARK_MAX_FOLDER_DEPTH ||
+        folders.length >= BOOKMARK_MAX_QUEUED_FOLDERS
+      ) {
+        // An unvisited branch might contain a second match.
+        throw new Error(limitMessage);
+      }
+      folders.push({ id: child.id, depth: parent.depth + 1 });
+    }
+  }
+  return match;
+}
+
+/** Resolve IDs first, a bare title across all roots, or a slash-delimited path from the root. */
 async function findFolderByPathOrId(
   pathOrId: string,
   scanBudget?: BookmarkScanBudget,
@@ -147,6 +178,9 @@ async function findFolderByPathOrId(
     .filter((p) => p.length > 0);
   if (pathParts.length === 0) return null;
 
+  if (!pathOrId.includes('/')) {
+    return findUniqueFolderByName(pathParts[0], scanBudget);
+  }
   const rootChildren = await chrome.bookmarks.getChildren('0');
 
   let currentNodes = rootChildren;
