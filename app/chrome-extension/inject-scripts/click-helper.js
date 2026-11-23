@@ -251,19 +251,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         });
       }
 
-      if (
-        element &&
-        (elementInfo.clickMethod === 'selector' || elementInfo.clickMethod === 'ref')
-      ) {
-        if (double) {
-          dispatchClickSequence(element, clickX, clickY, options, true);
-        } else {
-          dispatchClickSequence(element, clickX, clickY, options, false);
-        }
-      } else {
-        if (double) simulateDoubleClick(clickX, clickY, options);
-        else simulateClick(clickX, clickY, options);
-      }
+      if (element) await dispatchClickSequence(element, clickX, clickY, options, double);
 
       // Wait for navigation if needed
       let navigationOccurred = false;
@@ -282,33 +270,6 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         error: `Error clicking element: ${error.message}`,
       };
     }
-  }
-
-  /**
-   * Simulate a mouse click at specific coordinates
-   * @param {number} x - X coordinate relative to the viewport
-   * @param {number} y - Y coordinate relative to the viewport
-   */
-  function simulateClick(x, y, options = {}) {
-    const element = document.elementFromPoint(x, y);
-    if (!element) return;
-    dispatchClickSequence(element, x, y, options, false);
-  }
-
-  /**
-   * Simulate a double click sequence at specific coordinates
-   */
-  function simulateDoubleClick(x, y, options = {}) {
-    const element = document.elementFromPoint(x, y);
-    if (!element) return;
-    dispatchClickSequence(element, x, y, options, true);
-  }
-
-  /**
-   * Simulate double click using element when available
-   */
-  function simulateDomDoubleClick(element, x, y, options) {
-    dispatchClickSequence(element, x, y, options, true);
   }
 
   function normalizeMouseOpts(x, y, options = {}) {
@@ -336,43 +297,25 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
     };
   }
 
-  function dispatchClickSequence(element, x, y, options = {}, isDouble = false) {
+  async function dispatchClickSequence(element, x, y, options, isDouble) {
     const base = normalizeMouseOpts(x, y, options);
-    const down = new MouseEvent('mousedown', base);
-    const up = new MouseEvent('mouseup', base);
-    const click = new MouseEvent('click', base);
-    try {
-      element.dispatchEvent(down);
-    } catch {}
-    try {
-      element.dispatchEvent(up);
-    } catch {}
-    try {
-      element.dispatchEvent(click);
-    } catch {}
-    if (base.button === 2) {
-      // right button contextmenu
-      const ctx = new MouseEvent('contextmenu', base);
-      try {
-        element.dispatchEvent(ctx);
-      } catch {}
-    }
+    const dispatch = async (type) => {
+      if (options.permit && await chrome.runtime.sendMessage({
+        action: 'checkBrowserInput', permit: options.permit,
+      }) !== true) throw new Error('Click cancelled');
+      if (Date.now() >= options.deadlineAt) throw new Error('Workflow click timed out');
+      element.dispatchEvent(new MouseEvent(type, base));
+    };
+    await dispatch('mousedown');
+    await dispatch('mouseup');
+    await dispatch('click');
+    if (base.button === 2) await dispatch('contextmenu');
     if (isDouble) {
-      // second sequence + dblclick
-      setTimeout(() => {
-        try {
-          element.dispatchEvent(new MouseEvent('mousedown', base));
-        } catch {}
-        try {
-          element.dispatchEvent(new MouseEvent('mouseup', base));
-        } catch {}
-        try {
-          element.dispatchEvent(new MouseEvent('click', base));
-        } catch {}
-        try {
-          element.dispatchEvent(new MouseEvent('dblclick', base));
-        } catch {}
-      }, 30);
+      await new Promise(resolve => setTimeout(resolve, 30));
+      await dispatch('mousedown');
+      await dispatch('mouseup');
+      await dispatch('click');
+      await dispatch('dblclick');
     }
   }
 
@@ -424,6 +367,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         !!request.double,
         {
           deadlineAt: request.deadlineAt,
+          permit: request.permit,
           button: request.button,
           bubbles: request.bubbles,
           cancelable: request.cancelable,

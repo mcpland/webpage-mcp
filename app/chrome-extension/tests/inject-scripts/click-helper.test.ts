@@ -91,6 +91,26 @@ describe('click-helper bounded text summaries', () => {
     expect(clicked).not.toHaveBeenCalled();
   });
 
+  it.each(['timeout', 'cancel'])('stops an in-flight click sequence on %s', async (reason) => {
+    const button = document.createElement('button');
+    const clicked = vi.fn();
+    button.onclick = clicked;
+    document.body.append(button);
+    mockElementFromPoint(button);
+    mockMouseEvent();
+    const now = Date.now();
+    let allowed = true;
+    button.onmousedown = () => { allowed = false; };
+    vi.spyOn(Date, 'now').mockImplementation(() => allowed ? now : now + 100);
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(async () => allowed);
+    const result = await dispatch(loadHelper(), {
+      action: 'clickElement', coordinates: { x: 5, y: 5 },
+      ...(reason === 'timeout' ? { deadlineAt: now + 50 } : { permit: 'test' }),
+    });
+    expect(result.error).toMatch(/timed out|cancelled/);
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
   it('summarizes descendant text without reading subtree textContent', async () => {
     const button = document.createElement('button');
     button.append(document.createTextNode('Bounded '));

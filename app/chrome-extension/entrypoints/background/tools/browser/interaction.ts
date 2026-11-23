@@ -4,6 +4,7 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { hasDisallowedPublicUrlScheme } from './common';
+import { inputSignal, withInputPermit } from '@/utils/browser-input';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
   CdpUnavailableError,
@@ -185,10 +186,11 @@ async function dispatchHelperClick(
     typeof frameId === 'number' ? [frameId] : undefined,
   );
   context?.signal?.throwIfAborted();
-  return tool.sendMessageToTab(
+  return withInputPermit(tabId, frameId, context?.signal, (permit) => tool.sendMessageToTab(
     tabId,
     {
       action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+      ...(permit ? { permit } : {}),
       ...(context?.deadlineAt !== undefined ? { deadlineAt: context.deadlineAt } : {}),
       selector,
       coordinates,
@@ -202,7 +204,7 @@ async function dispatchHelperClick(
       modifiers: args.modifiers,
     },
     frameId,
-  );
+  ));
 }
 
 const HELPER_CLICK_RESPONSE_MARGIN_MS = 2000;
@@ -428,9 +430,7 @@ class ClickTool extends BaseBrowserToolExecutor {
 
     try {
       const deadline = context?.deadlineAt;
-      if (deadline !== undefined && deadline <= Date.now()) throw new Error('Workflow click timed out');
-      const deadlineSignal = deadline === undefined ? undefined : AbortSignal.timeout(Math.min(Math.max(0, deadline - Date.now()), 2_147_483_647));
-      const signal = deadlineSignal && context?.signal ? AbortSignal.any([deadlineSignal, context.signal]) : deadlineSignal ?? context?.signal;
+      const signal = inputSignal(context);
       signal?.throwIfAborted();
       // Resolve tab
       const explicit = await this.tryGetTab(args.tabId);
