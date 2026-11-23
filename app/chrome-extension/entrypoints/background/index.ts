@@ -27,6 +27,19 @@ export default defineBackground(() => {
 
   // Open welcome page on first install
   chrome.runtime.onInstalled.addListener((details) => {
+    // Static document-start scripts only reach future navigations. Protect tabs
+    // that already have a document when the extension is installed or updated.
+    if (details.reason === "install" || details.reason === "update") {
+      void chrome.tabs.query({ url: ["http://*/*", "https://*/*"] }).then(tabs =>
+        Promise.allSettled(tabs.flatMap(tab => tab.id === undefined || tab.discarded ? [] : [
+          chrome.scripting.executeScript({
+            target: { tabId: tab.id, allFrames: true },
+            files: ["content-scripts/pointer-cancel.js"],
+            injectImmediately: true,
+          }),
+        ])),
+      ).catch(() => {});
+    }
     if (details.reason === "install") {
       // Open the welcome/onboarding page for new installations
       chrome.tabs.create({

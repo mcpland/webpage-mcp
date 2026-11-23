@@ -4,6 +4,8 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { hasDisallowedPublicUrlScheme } from './common';
+import { runInNativeMouseQueue } from '../../tab-queue';
+import { CANCEL_MOUSE_COORDINATE } from '@/utils/cancelled-mouse';
 import { inputSignal, withInputPermit, type BrowserInputContext } from '@/utils/browser-input';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
@@ -89,38 +91,42 @@ async function dispatchNativeClick(
     'click',
     async (dialogSignal) => {
       const signal = options.signal ? AbortSignal.any([options.signal, dialogSignal]) : dialogSignal;
-      if (signal.aborted) return;
-      await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
-        type: 'mouseMoved',
-        x: Math.round(coordinates.x),
-        y: Math.round(coordinates.y),
-        button: 'none',
-        buttons: 0,
-        modifiers,
-      }, signal);
-
-      for (let index = 1; index <= clickCount; index += 1) {
+      return runInNativeMouseQueue(tabId, async () => {
         if (signal.aborted) return;
         await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
-          type: 'mousePressed',
+          type: 'mouseMoved',
           x: Math.round(coordinates.x),
           y: Math.round(coordinates.y),
-          button,
-          buttons: buttonMask,
-          clickCount: index,
-          modifiers,
-        }, signal);
-        if (signal.aborted) return;
-        await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
-          type: 'mouseReleased',
-          x: Math.round(coordinates.x),
-          y: Math.round(coordinates.y),
-          button,
+          button: 'none',
           buttons: 0,
-          clickCount: index,
           modifiers,
         }, signal);
-      }
+
+        for (let index = 1; index <= clickCount; index += 1) {
+          if (signal.aborted) return;
+          const position = { x: Math.round(coordinates.x), y: Math.round(coordinates.y), button, modifiers };
+          let pressSent = false;
+          let releaseSent = false;
+          try {
+            await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+              ...position, type: 'mousePressed', buttons: buttonMask, clickCount: index,
+            }, signal, () => { pressSent = true; });
+            signal.throwIfAborted();
+            await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+              ...position, type: 'mouseReleased', buttons: 0, clickCount: index,
+            }, signal, () => { releaseSent = true; });
+          } finally {
+            if (pressSent && !releaseSent && signal.aborted) {
+              // A cancelled acknowledgement can still represent a delivered press.
+              // The document-start observer suppresses activation at this reserved position.
+              await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+                x: CANCEL_MOUSE_COORDINATE, y: CANCEL_MOUSE_COORDINATE, button, modifiers,
+                type: 'mouseReleased', buttons: 0, clickCount: 0,
+              }, AbortSignal.timeout(1_000)).catch(() => {});
+            }
+          }
+        }
+      }, signal);
     },
     { dialog: options.dialog },
   );

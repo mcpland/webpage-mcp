@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runInTabQueue, runInTabRequestQueue } from '@/entrypoints/background/tab-queue';
+import { runInTabQueue, runInTabRequestQueue, runInNativeMouseQueue } from '@/entrypoints/background/tab-queue';
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -110,6 +110,21 @@ describe('runInTabQueue', () => {
     finish.resolve();
     await Promise.all([running, next]);
     expect(order).toEqual(['admitted', 'next']);
+  });
+
+  it('queues the next native press behind a cancelled press until its release settles', async () => {
+    const cleanup = deferred();
+    const controller = new AbortController();
+    const previous = runInNativeMouseQueue(8, () => cleanup.promise, controller.signal);
+    await tick();
+    controller.abort();
+    let pressed = false;
+    const next = runInNativeMouseQueue(8, async () => { pressed = true; }, new AbortController().signal);
+    await tick();
+    expect(pressed).toBe(false);
+    cleanup.resolve();
+    await Promise.all([previous, next]);
+    expect(pressed).toBe(true);
   });
 
   it('keeps different tabs independent', async () => {

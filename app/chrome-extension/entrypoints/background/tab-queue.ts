@@ -10,6 +10,7 @@
 
 const tabQueueTails = new Map<number, Promise<void>>();
 const requestQueueTails = new Map<number, Promise<void>>();
+const nativeMouseTails = new Map<number, Promise<void>>();
 
 function createAbortError(): Error {
   const error = new Error('Tool execution cancelled');
@@ -75,10 +76,16 @@ export function runInTabRequestQueue<T>(tabId: number, task: () => Promise<T>, o
   return runInQueue(requestQueueTails, tabId, task, options);
 }
 
+/** A later press must not overtake the previous press's compensating release. */
+export function runInNativeMouseQueue<T>(tabId: number, task: () => Promise<T>, signal: AbortSignal) {
+  return runInQueue(nativeMouseTails, tabId, task, { waitSignal: signal });
+}
+
 export function clearTabQueue(tabId: number): void {
   if (!Number.isFinite(tabId)) {
     return;
   }
   tabQueueTails.delete(tabId);
   requestQueueTails.delete(tabId);
+  nativeMouseTails.delete(tabId);
 }

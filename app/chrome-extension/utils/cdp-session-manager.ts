@@ -304,12 +304,14 @@ export class CDPSessionManager {
     method: string,
     params?: object,
     signal?: AbortSignal,
+    onSubmitted?: () => void,
   ): Promise<T> {
     signal?.throwIfAborted();
     const owner = Symbol(`send:${method}`);
     const send = async (): Promise<T> => {
       signal?.throwIfAborted();
       const reply = this.getDebuggerApi().sendCommand({ tabId }, method, params) as Promise<T>;
+      onSubmitted?.();
       if (!signal) return reply;
       let onAbort!: () => void;
       const aborted = new Promise<never>((_, reject) => {
