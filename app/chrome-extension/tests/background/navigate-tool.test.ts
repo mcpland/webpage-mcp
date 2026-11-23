@@ -1191,6 +1191,26 @@ describe('navigateTool', () => {
     }
   });
 
+  it('reads joint history again when a child event arrives before a stale snapshot is delivered', async () => {
+    const event = { addListener: vi.fn(), removeListener: vi.fn() };
+    Object.assign(chrome, { webNavigation: {
+      onHistoryStateUpdated: event, getAllFrames: async () => [{ frameId: 9 }],
+    } });
+    const notify = () => event.addListener.mock.calls[0][0]({ tabId: makeTab().id, frameId: 9 });
+    const stale = { currentIndex: 1, entries: [{ id: 10 }, { id: 20 }] };
+    const history = vi.spyOn(cdpSessionManager, 'sendCommand')
+      .mockResolvedValueOnce(stale)
+      .mockImplementationOnce(async () => { notify(); return stale; })
+      .mockResolvedValueOnce({ ...stale, currentIndex: 0 });
+    mocks.tabsGoBack.mockImplementation(async () => notify());
+    try {
+      expect((await navigateTool.execute({ url: 'back', waitUntil: 'commit' })).isError).toBe(false);
+      expect(history).toHaveBeenCalledTimes(3);
+    } finally {
+      history.mockRestore();
+    }
+  });
+
   it.each(['before', 'after'])('retains a slow %s read from the traversing frame while a sibling is stalled', async (slow) => {
     const history = vi.spyOn(cdpSessionManager, 'sendCommand').mockRejectedValue(new Error('Debugger in use'));
     const event = { addListener: vi.fn(), removeListener: vi.fn() };

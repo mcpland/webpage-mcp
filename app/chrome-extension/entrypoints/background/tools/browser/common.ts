@@ -310,10 +310,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
         if (details.transitionQualifiers?.includes('forward_back')) childTraversed = true;
       }
     };
-    const checkUpdatedFrames = () => {
-      for (const frameId of updatedFrames) {
-        if (readingFrames.has(frameId)) continue;
-        updatedFrames.delete(frameId);
+    const checkUpdatedFrames = (frames: number[]) => {
+      for (const frameId of frames) {
+        if (readingFrames.has(frameId)) {
+          updatedFrames.add(frameId);
+          continue;
+        }
         const baseline = baselines.get(frameId);
         if (!baseline) continue;
         readingFrames.add(frameId);
@@ -344,14 +346,18 @@ class NavigateTool extends BaseBrowserToolExecutor {
         // qualifier. Confirm it reached an existing joint session-history entry.
         const topTraversed = current.url && (current.url !== previousUrl || current.url === committedUrl);
         if (!topTraversed && (childUpdated || updatedFrames.size) && !childTraversed) {
-          const history = childUpdated && destinations?.size ? await readTabHistory(tabId, signal) : undefined;
+          // Consume only events already observed. Chrome can deliver another one
+          // while the debugger is returning a snapshot from the previous event.
+          const changedFrames = [...updatedFrames];
+          updatedFrames.clear();
+          const readJointHistory = childUpdated && destinations?.size;
           childUpdated = false;
+          const history = readJointHistory ? await readTabHistory(tabId, signal) : undefined;
           if (history && destinations) {
-            updatedFrames.clear();
             const entry = history.entries[history.currentIndex];
-            childTraversed = entry !== undefined && destinations.has(entry.id);
+            childTraversed ||= entry !== undefined && destinations.has(entry.id);
           } else {
-            checkUpdatedFrames();
+            checkUpdatedFrames(changedFrames);
           }
         }
         if (topTraversed || (current.url && childTraversed)) {
