@@ -132,6 +132,22 @@ describe("record-replay-v3 compat", () => {
     );
   });
 
+  it("includes initial tab loading in the global timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      asMock(chrome.tabs.query).mockResolvedValue([]);
+      asMock(chrome.tabs.create).mockResolvedValue({ id: 41 });
+      asMock(chrome.tabs.get).mockResolvedValue({ id: 41, url: "https://example.com/", status: "loading" });
+      const run = expect(enqueueRunAndWait({ flowId: "slow", tabTarget: "new",
+        startUrl: "https://example.com/", timeoutMs: 1000 })).rejects.toThrow("within 1000ms");
+      await vi.advanceTimersByTimeAsync(1001);
+      await run;
+      expect(mocks.enqueueRun).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("passes the global deadline to the active action and cancels a timed-out run on its bound tab", async () => {
     vi.useFakeTimers();
     try {

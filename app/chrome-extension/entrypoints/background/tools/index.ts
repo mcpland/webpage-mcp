@@ -1,3 +1,4 @@
+import { workflowTimeoutMs } from '@/utils/workflow-timeout';
 import { createErrorResponse } from '@/common/tool-handler';
 import { ERROR_MESSAGES } from '@/common/constants';
 import { readMcpBackgroundModeDefault } from '@/common/mcp-background-mode';
@@ -449,6 +450,8 @@ function extractSessionPatchFromResult(
  */
 export const handleCallTool = async (param: ToolCallParam) => {
   throwIfToolAborted(param.signal);
+  const flowTimeout = param.name === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN ? workflowTimeoutMs(param.args?.timeoutMs) : undefined;
+  const deadlineAt = flowTimeout === undefined ? param.deadlineAt : Math.min(param.deadlineAt ?? Infinity, Date.now() + flowTimeout);
   let tool = toolsMap.get(param.name);
   if (!tool) {
     tool = await getLazyTool(param.name);
@@ -472,11 +475,11 @@ export const handleCallTool = async (param: ToolCallParam) => {
     throwIfToolAborted(param.signal);
 
     const executionContext =
-      param.signal || param.deadlineAt !== undefined ||
+      param.signal || deadlineAt !== undefined ||
       (param.meta &&
         (param.meta.clientCapabilities !== undefined || MCP_CONTEXT_AWARE_TOOLS.has(param.name)))
         ? {
-            ...(param.deadlineAt !== undefined ? { deadlineAt: param.deadlineAt } : {}),
+            ...(deadlineAt !== undefined ? { deadlineAt } : {}),
             ...(param.meta ? { meta: param.meta } : {}),
             ...(param.signal ? { signal: param.signal } : {}),
           }
@@ -516,14 +519,24 @@ export const handleCallTool = async (param: ToolCallParam) => {
     const tabId = resolvedTarget.tabId;
     const executeForTarget = () => {
       if (tabId === undefined || TAB_QUEUE_EXEMPT_TOOLS.has(param.name)) return execute();
-      const options = { signal: param.signal };
+      const queueTimeout = flowTimeout === undefined ? undefined
+        : AbortSignal.timeout(Math.max(0, Math.min(deadlineAt! - Date.now(), 2_147_483_647)));
+      const waitSignal = queueTimeout && param.signal
+        ? AbortSignal.any([queueTimeout, param.signal]) : queueTimeout ?? param.signal;
+      // Once admitted, the flow owns this queue until its cancellation has settled.
+      const options = { signal: param.signal, waitSignal };
       // A flow calls back into this router for individual steps. Holding the operation
       // queue across the entire flow would make it wait for itself.
       const runOperation = param.name === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN
         ? execute
-        : () => runInTabQueue(tabId, execute, options);
+        : () => runInTabQueue(tabId, execute, { signal: param.signal });
       return param.meta?.source || sessionId
-        ? runInTabRequestQueue(tabId, runOperation, options)
+        ? runInTabRequestQueue(tabId, runOperation, options).catch(error => {
+            if (queueTimeout?.aborted && !param.signal?.aborted && error?.name === 'AbortError') {
+              throw new Error(`Workflow did not finish within ${flowTimeout}ms`);
+            }
+            throw error;
+          })
         : runOperation();
     };
     const result = await executeForTarget();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runInTabQueue } from '@/entrypoints/background/tab-queue';
+import { runInTabQueue, runInTabRequestQueue } from '@/entrypoints/background/tab-queue';
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -92,6 +92,24 @@ describe('runInTabQueue', () => {
     blocker.resolve();
     await Promise.all([running, newcomer]);
     expect(order).toEqual(['running', 'newcomer']);
+  });
+
+  it('retains an admitted workflow lease while its deadline cancellation settles', async () => {
+    const finish = deferred();
+    const deadline = new AbortController();
+    const order: string[] = [];
+    const running = runInTabRequestQueue(7, async () => {
+      order.push('admitted');
+      await finish.promise;
+    }, { waitSignal: deadline.signal });
+    await tick();
+    deadline.abort();
+    const next = runInTabRequestQueue(7, async () => order.push('next'));
+    await tick();
+    expect(order).toEqual(['admitted']);
+    finish.resolve();
+    await Promise.all([running, next]);
+    expect(order).toEqual(['admitted', 'next']);
   });
 
   it('keeps different tabs independent', async () => {

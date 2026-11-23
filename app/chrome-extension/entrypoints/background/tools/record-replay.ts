@@ -1075,7 +1075,7 @@ class FlowRunTool {
   name = TOOL_NAMES.RECORD_REPLAY.FLOW_RUN;
   async execute(
     args: any,
-    context?: { signal?: AbortSignal },
+    context?: { signal?: AbortSignal; deadlineAt?: number },
   ): Promise<ToolResult> {
     const normalizeScreenshotBaselines = (
       value: unknown,
@@ -1183,6 +1183,7 @@ class FlowRunTool {
         },
         startUrl: normalizedStartUrl,
         refresh: refresh === true,
+        deadlineAt: context?.deadlineAt,
         timeoutMs:
           typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
             ? Math.max(1_000, Math.floor(timeoutMs))

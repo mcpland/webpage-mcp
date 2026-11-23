@@ -255,7 +255,15 @@ describe('handleCallTool navigation routing', () => {
       tabId: 10,
       windowId: 55,
       background: true,
+    }, expect.objectContaining({ deadlineAt: expect.any(Number) }));
+  });
+
+  it('keeps the earlier caller deadline when a workflow declares a longer timeout', async () => {
+    const deadlineAt = Date.now() + 1000;
+    await handleCallTool({
+      name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN, args: { flowId: 'flow-1', timeoutMs: 60000 }, deadlineAt,
     });
+    expect(mocks.flowRunExecute).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ deadlineAt }));
   });
 
   it('does not apply the MCP background default to non-MCP calls', async () => {
@@ -832,7 +840,7 @@ describe('handleCallTool navigation routing', () => {
 
     expect(mocks.flowRunExecute).toHaveBeenCalledWith(
       expect.objectContaining({ flowId: 'flow-1' }),
-      { signal: controller.signal },
+      { signal: controller.signal, deadlineAt: expect.any(Number) },
     );
   });
 

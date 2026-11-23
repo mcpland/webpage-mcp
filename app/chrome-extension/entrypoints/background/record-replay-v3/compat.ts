@@ -1,3 +1,5 @@
+import { readWithSignal } from '@/utils/read-with-signal';
+import { workflowTimeoutMs } from '@/utils/workflow-timeout';
 import type {
   Flow as CompatFlow,
   RunLogEntry,
@@ -29,7 +31,7 @@ import {
 } from "./run-target";
 import type { ExecutionFlags } from "@/entrypoints/background/replay-actions";
 
-const DEFAULT_RUN_TIMEOUT_MS = 60_000;
+
 const RUN_POLL_INTERVAL_MS = 150;
 
 export interface SaveFlowToV3Options {
@@ -571,6 +573,7 @@ export function buildCompatRunResult(
 }
 
 interface CompatRunInput {
+  deadlineAt?: number;
   flowId: FlowId;
   expectedRevision?: string;
   tabId?: number;
@@ -588,18 +591,37 @@ interface CompatRunInput {
 
 export async function enqueueRunAndWait(input: CompatRunInput) {
   throwIfRunAborted(input.signal);
-  const runtime = await ensureV3Runtime();
-  return withRunTargetTab(input, (tabId) => enqueueResolvedRunAndWait(input, runtime, tabId));
+  const timeoutMs = workflowTimeoutMs(input.timeoutMs);
+  const deadline = input.deadlineAt ?? Date.now() + timeoutMs;
+  const remaining = deadline - Date.now();
+  const timeoutError = () => new Error(`Workflow did not finish within ${timeoutMs}ms`);
+  if (remaining <= 0) throw timeoutError();
+  const setup = new AbortController();
+  const signal = input.signal ? AbortSignal.any([input.signal, setup.signal]) : setup.signal;
+  const timer = setTimeout(() => setup.abort(), Math.min(remaining, 2_147_483_647));
+  try {
+    const runtime = await readWithSignal(ensureV3Runtime, signal);
+    return await withRunTargetTab({ ...input, signal }, (tabId) => {
+      if (Date.now() >= deadline || setup.signal.aborted) throw timeoutError();
+      clearTimeout(timer);
+      return enqueueResolvedRunAndWait(input, runtime, tabId, deadline, timeoutMs);
+    });
+  } catch (error) {
+    if (setup.signal.aborted && !input.signal?.aborted) throw timeoutError();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function enqueueResolvedRunAndWait(
   input: CompatRunInput,
   runtime: V3Runtime,
   resolvedTabId: number,
+  deadline: number,
+  timeoutMs: number,
 ): Promise<{ run: RunRecordV3; events: RunEvent[]; result: RunResult }> {
   throwIfRunAborted(input.signal);
-  const timeoutMs = Math.max(1_000, input.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS);
-  const deadline = Date.now() + timeoutMs;
   const { runId } = await enqueueRun(
     {
       storage: runtime.storage,

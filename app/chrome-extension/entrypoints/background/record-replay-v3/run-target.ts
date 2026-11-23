@@ -259,19 +259,22 @@ export async function withRunTargetTab<T>(
     }
     const tabId = created.id;
     // Reserve the newly allocated tab before its first readiness poll.
-    return runInTabRequestQueue(tabId, async () => {
-      try {
+    let admitted = false;
+    try {
+      return await runInTabRequestQueue(tabId, async () => {
         await waitForTabReady(tabId, {
           previousUrl: activeTab?.url || undefined,
           targetUrl: urlToOpen,
           signal: input.signal,
         });
-      } catch (error) {
-        if (input.signal?.aborted) await chrome.tabs.remove(tabId).catch(() => {});
-        throw error;
-      }
-      return run(tabId);
-    });
+        throwIfTargetAborted(input.signal);
+        admitted = true;
+        return run(tabId);
+      }, { signal: input.signal });
+    } catch (error) {
+      if (!admitted && input.signal?.aborted) await chrome.tabs.remove(tabId).catch(() => {});
+      throw error;
+    }
   }
 
   let targetTab: chrome.tabs.Tab | null =

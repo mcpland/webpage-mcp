@@ -34,7 +34,7 @@ async function runInQueue<T>(
   tails: Map<number, Promise<void>>,
   tabId: number,
   task: () => Promise<T>,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; waitSignal?: AbortSignal } = {},
 ): Promise<T> {
   const { signal } = options;
   const previous = tails.get(tabId) ?? Promise.resolve();
@@ -58,7 +58,7 @@ async function runInQueue<T>(
   });
 
   try {
-    await waitForTurn(previous, signal);
+    await waitForTurn(previous, options.waitSignal ?? signal);
     return await task();
   } finally {
     signal?.removeEventListener('abort', onAbort);
@@ -71,7 +71,7 @@ export function runInTabQueue<T>(tabId: number, task: () => Promise<T>, options?
 }
 
 /** A public workflow owns the request queue while its steps use the operation queue. */
-export function runInTabRequestQueue<T>(tabId: number, task: () => Promise<T>, options?: { signal?: AbortSignal }) {
+export function runInTabRequestQueue<T>(tabId: number, task: () => Promise<T>, options?: { signal?: AbortSignal; waitSignal?: AbortSignal }) {
   return runInQueue(requestQueueTails, tabId, task, options);
 }
 
