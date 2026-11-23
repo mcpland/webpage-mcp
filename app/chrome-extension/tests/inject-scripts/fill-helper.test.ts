@@ -38,7 +38,18 @@ function createHost(): { host: HTMLDivElement; root: ShadowRoot } {
   return { host, root };
 }
 
-describe('fill-helper bounded shadow search', () => {
+function createCoveredField() {
+  document.body.innerHTML = '<input id="field" value="original"><div id="overlay"></div>';
+  const field = document.querySelector<HTMLInputElement>('#field')!;
+  const overlay = document.querySelector('#overlay')!;
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: () => overlay.isConnected ? overlay : field,
+  });
+  return { field, overlay };
+}
+
+describe('fill helper', () => {
   beforeEach(() => {
     document.documentElement.innerHTML = '<head></head><body></body>';
     vi.spyOn(window, 'getComputedStyle').mockReturnValue({
@@ -72,6 +83,7 @@ describe('fill-helper bounded shadow search', () => {
     delete (document as any).elementFromPoint;
     delete (Element.prototype as any).scrollIntoView;
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('finds only the first fillable result without reading children collections', async () => {
@@ -136,6 +148,91 @@ describe('fill-helper bounded shadow search', () => {
     const result = await dispatch(loadHelper(), { action: 'fillElement', selector: '#field', value: 'late', permit: 'permit' });
     expect(result.error).toContain('cancelled');
     expect(field.value).toBe('');
+  });
+
+  it('fills an already reachable field without scrolling or advancing the clock', async () => {
+    vi.useFakeTimers();
+    const { field, overlay } = createCoveredField();
+    overlay.remove();
+    const result = await dispatch(loadHelper(), { action: 'fillElement', selector: '#field', value: 'now' });
+    expect(result.success).toBe(true);
+    expect(field.value).toBe('now');
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('waits only until the center of the control is uncovered', async () => {
+    vi.useFakeTimers();
+    const { field, overlay } = createCoveredField();
+    const result = dispatch(loadHelper(), { action: 'fillElement', selector: '#field', value: 'ready' });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(field.value).toBe('original');
+    overlay.remove();
+    await vi.advanceTimersByTimeAsync(20);
+    expect((await result).success).toBe(true);
+    expect(field.value).toBe('ready');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    ['occlusion', 'not visible'],
+    ['cancellation', 'cancelled'],
+    ['deadline', 'timed out'],
+  ])('never writes through %s during scroll settling', async (reason, expectedError) => {
+    vi.useFakeTimers();
+    const { field, overlay } = createCoveredField();
+    const input = vi.fn();
+    field.addEventListener('input', input);
+    let live = true;
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation(async () => live);
+    const result = dispatch(loadHelper(), {
+      action: 'fillElement', selector: '#field', value: 'late', permit: 'permit',
+      deadlineAt: reason === 'deadline' ? Date.now() + 12 : undefined,
+    });
+    await vi.advanceTimersByTimeAsync(5);
+    if (reason === 'cancellation') live = false;
+    if (reason !== 'occlusion') overlay.remove();
+    await vi.advanceTimersByTimeAsync(100);
+    expect((await result).error).toContain(expectedError);
+    expect(field.value).toBe('original');
+    expect(document.activeElement).not.toBe(field);
+    expect(input).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    ['<fieldset disabled><input id="field"></fieldset>', 'disabled'],
+    ['<textarea id="field" readonly></textarea>', 'read-only'],
+  ])('rejects a visible non-editable field in %s', async (markup, error) => {
+    document.body.innerHTML = markup;
+    const field = document.querySelector<HTMLInputElement>('#field')!;
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => field });
+    const result = await dispatch(loadHelper(), { action: 'fillElement', selector: '#field', value: 'late' });
+    expect(result.error).toContain(error);
+    expect(field.value).toBe('');
+  });
+
+  it('fills a visible field once enabled without scrolling it', async () => {
+    vi.useFakeTimers();
+    const { field, overlay } = createCoveredField();
+    overlay.remove();
+    field.disabled = true;
+    const result = dispatch(loadHelper(), { action: 'fillElement', selector: '#field', value: 'enabled' });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(field.value).toBe('original');
+    field.disabled = false;
+    await vi.advanceTimersByTimeAsync(20);
+    expect((await result).success).toBe(true);
+    expect(field.value).toBe('enabled');
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('rechecks occlusion if focusing the field opens an overlay', async () => {
+    const { field, overlay } = createCoveredField();
+    overlay.remove();
+    field.onfocus = () => document.body.append(overlay);
+    const result = await dispatch(loadHelper(), { action: 'fillElement', selector: '#field', value: 'late' });
+    expect(result.error).toContain('not visible');
+    expect(field.value).toBe('original');
   });
 
   it('refocuses the exact filled control if an input handler moved focus before submit', async () => {
@@ -213,6 +310,7 @@ describe('fill-helper bounded shadow search', () => {
   });
 
   it('scrolls an offscreen rendered input into view before visibility check and reports ref on error', async () => {
+    vi.useFakeTimers();
     document.body.innerHTML = '<input id="below" /><span id="not-input">text</span>';
     const input = document.getElementById('below') as HTMLInputElement;
     let scrolled = false;

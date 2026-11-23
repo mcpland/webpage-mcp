@@ -30,6 +30,8 @@ if (window.__FILL_HELPER_INITIALIZED__) {
   const MAX_SHADOW_SEARCH_MS = 100;
   const MAX_SHADOW_SEARCH_FRONTIER = 512;
   const MAX_SHADOW_SEARCH_ROOTS = 64;
+  const FILL_READY_TIMEOUT_MS = 100;
+  const FILL_READY_POLL_MS = 16;
 
   function findFillableInShadowRoot(root) {
     if (!(root instanceof ShadowRoot)) return null;
@@ -226,12 +228,29 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         };
       }
 
-      // Scroll element into view before viewport/occlusion visibility checks
-      if (typeof element.scrollIntoView === 'function') {
-        element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
-        await new Promise((resolve) => setTimeout(resolve, 100));
+      await checkInput();
+      let blocker = getFillBlocker(element);
+      if (blocker && element.isConnected) {
+        if (blocker === 'not visible') {
+          element.scrollIntoView?.({ behavior: 'instant', block: 'center', inline: 'center' });
+        }
+        const stopAt = performance.now() + FILL_READY_TIMEOUT_MS;
+        // Recheck immediately after scrolling. Only poll while the field is blocked.
+        for (;;) {
+          await checkInput();
+          blocker = getFillBlocker(element);
+          const remaining = Math.min(stopAt - performance.now(), (deadlineAt ?? Infinity) - Date.now());
+          if (!blocker || !element.isConnected || remaining <= 0) break;
+          await new Promise((resolve) => setTimeout(resolve, Math.min(FILL_READY_POLL_MS, remaining)));
+        }
       }
 
+      if (!blocker) {
+        element.focus();
+        await checkInput();
+        // Page focus handlers can replace, disable or cover the control.
+        blocker = getFillBlocker(element);
+      }
       const rect = element.getBoundingClientRect();
       elementInfo.rect = {
         x: rect.x,
@@ -243,19 +262,12 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         bottom: rect.bottom,
         left: rect.left,
       };
-      elementInfo.isVisible = isElementVisible(element);
-      if (!elementInfo.isVisible) {
-        return {
-          error: `Element "${targetLabel}" is not visible`,
-          elementInfo,
-        };
+      elementInfo.isVisible = blocker !== 'not visible';
+      if (blocker) {
+        return { error: `Element "${targetLabel}" is ${blocker}`, elementInfo };
       }
 
-      await checkInput();
       pendingSubmit = submitToken ? { token: submitToken, element: new WeakRef(element) } : undefined;
-      // Focus the element
-      element.focus();
-      await checkInput();
 
       const emit = async (type) => {
         await checkInput();
@@ -399,13 +411,23 @@ if (window.__FILL_HELPER_INITIALIZED__) {
     }
   }
 
+  function getFillBlocker(element) {
+    if (!isElementVisible(element)) return 'not visible';
+    if (element.matches(':disabled')) return 'disabled';
+    // For supported input types, readonly applies only to text-like controls.
+    if (element.readOnly && !['checkbox', 'radio', 'range', 'color'].includes(element.type)) {
+      return 'read-only';
+    }
+    return null;
+  }
+
   /**
    * Check whether an element has rendered box geometry (may still be offscreen).
    * @param {Element} element
    * @returns {boolean}
    */
   function isElementRendered(element) {
-    if (!element) return false;
+    if (!element?.isConnected) return false;
 
     const style = window.getComputedStyle(element);
     if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
