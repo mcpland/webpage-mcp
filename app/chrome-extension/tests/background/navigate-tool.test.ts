@@ -1,3 +1,4 @@
+import { inspectFrameHistory } from '@/utils/frame-history';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -1141,6 +1142,30 @@ describe('navigateTool', () => {
       history.mockRestore();
       vi.useRealTimers();
     }
+  });
+
+  it('observes a trusted popstate before the page stops propagation in the capture phase', async () => {
+    type Listener = (event: { isTrusted: boolean; stopImmediatePropagation(): void }) => void;
+    const listeners: Listener[] = [];
+    const addEventListener = vi.fn((_type: string, listener: Listener, _options: { capture: boolean }) => {
+      listeners.push(listener);
+    });
+    vi.stubGlobal('window', { top: {}, navigation: { currentEntry: null }, addEventListener });
+    vi.stubGlobal('defineContentScript', (definition: unknown) => definition);
+    const { default: observer } = await import('@/entrypoints/frame-history.content');
+    expect(observer).toMatchObject({ runAt: 'document_start', world: 'ISOLATED', allFrames: true, matchOriginAsFallback: true });
+    observer.main({} as never);
+    expect(addEventListener).toHaveBeenCalledWith('popstate', expect.any(Function), { capture: true });
+    const pageHandler = vi.fn<Listener>(event => event.stopImmediatePropagation());
+    addEventListener('popstate', pageHandler, { capture: true });
+    expect(inspectFrameHistory('back')).toBe(0);
+    let stopped = false;
+    for (const listener of listeners) {
+      listener({ isTrusted: true, stopImmediatePropagation: () => { stopped = true; } });
+      if (stopped) break;
+    }
+    expect(pageHandler).toHaveBeenCalledOnce();
+    expect(inspectFrameHistory('current')).toBe(1);
   });
 
   it.each(['back', 'forward'] as const)('observes trusted %s traversal in the original opaque document', async (direction) => {

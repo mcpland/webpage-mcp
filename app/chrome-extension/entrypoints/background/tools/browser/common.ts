@@ -1,3 +1,4 @@
+import { inspectFrameHistory, type FrameHistoryRead } from '@/utils/frame-history';
 import { readWithSignal } from '@/utils/read-with-signal';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
@@ -33,36 +34,13 @@ function readTabHistory(tabId: number, signal: AbortSignal): Promise<TabHistory 
     .catch(() => undefined);
 }
 
-type FrameHistoryRead = 'back' | 'forward' | 'current';
-
 async function readFrameHistory(tabId: number, frameId: number, direction: FrameHistoryRead, signal: AbortSignal) {
   // Navigation API keys are scoped to a frame and survive same-document traversal.
   // An isolated world can read them while another client owns the debugger.
   return readWithSignal(() => chrome.scripting.executeScript({
     target: { tabId, frameIds: [frameId] }, world: 'ISOLATED', injectImmediately: true,
     args: [direction],
-    func: (direction: FrameHistoryRead): string[] | number => {
-      if (window === window.top) return [];
-      const nav = (window as Window & { navigation?: {
-        currentEntry: NavigationHistoryEntry | null;
-        entries(): NavigationHistoryEntry[];
-      } }).navigation;
-      const current = nav?.currentEntry;
-      if (!nav || !current) {
-        // Opaque frames have no Navigation API entries. One listener per document
-        // observes browser popstate without reading the page's history state.
-        const scope = window as Window & { __webpageMcpPopstate?: { count: number } };
-        if (!scope.__webpageMcpPopstate) {
-          const observed = { count: 0 };
-          window.addEventListener('popstate', (event) => { if (event.isTrusted) observed.count++; });
-          scope.__webpageMcpPopstate = observed;
-        }
-        return scope.__webpageMcpPopstate.count;
-      }
-      if (direction === 'current') return [current.key];
-      return nav.entries().filter((entry) => direction === 'back'
-        ? entry.index < current.index : entry.index > current.index).map((entry) => entry.key);
-    },
+    func: inspectFrameHistory,
   }), signal).then(entries => entries.find(entry => entry.frameId === frameId)).catch(() => undefined);
 }
 
