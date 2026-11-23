@@ -111,6 +111,7 @@ const scenarios = {
     // Move focus after Chrome's frame inventory, immediately before the first native up.
     function interruptRelease(tabId, childUrl) {
       const send = chrome.debugger.sendCommand;
+      globalThis.releaseRaceStage = "waiting for native keyup";
       globalThis.restoreReleaseRace = () => {
         chrome.debugger.sendCommand = send;
         delete globalThis.restoreReleaseRace;
@@ -118,6 +119,7 @@ const scenarios = {
       chrome.debugger.sendCommand = async function (target, method, params) {
         if (target.tabId === tabId && method === "Input.dispatchKeyEvent" && params.type === "keyUp") {
           globalThis.restoreReleaseRace();
+          globalThis.releaseRaceStage = "waiting for child focus";
           await chrome.scripting.executeScript({
             target: { tabId }, world: "MAIN", args: [childUrl], func: url => new Promise(resolve => {
               const frame = document.createElement("iframe");
@@ -132,6 +134,10 @@ const scenarios = {
               document.body.append(frame);
             }),
           });
+          globalThis.releaseRaceStage = "dispatching native keyup";
+          const result = await send.call(this, target, method, params);
+          globalThis.releaseRaceStage = "complete";
+          return result;
         }
         return send.call(this, target, method, params);
       };
@@ -149,6 +155,14 @@ const scenarios = {
       controller.abort();
       assert.ok(await pending);
       assert.ok(await t.pageLog("/cancel-key-chord", "released", inParent));
+      // Navigation can finish the parent’s synthetic cleanup before the intercepted
+      // native command has actually reached the new frame.
+      let stage;
+      assert.ok(await waitFor(async () => {
+        const reply = await worker.send("Runtime.evaluate", { expression: "globalThis.releaseRaceStage" });
+        stage = reply.result.value;
+        return stage === "complete";
+      }), `Cross-site key release stopped at ${stage}`);
       const next = await t.call("chrome_keyboard", { tabId, keys: "Shift" });
       assert.ok(next.ok, next.text);
       assert.ok(await t.pageLog(child.pathname, "up", data => data.code === "ShiftLeft"));
@@ -156,7 +170,7 @@ const scenarios = {
         .map(entry => entry.data), [{ code: "ShiftLeft", trusted: true }]);
     } finally {
       controller.abort();
-      try { await worker.send("Runtime.evaluate", { expression: "globalThis.restoreReleaseRace?.()" }); }
+      try { await worker.send("Runtime.evaluate", { expression: "globalThis.restoreReleaseRace?.(); delete globalThis.releaseRaceStage" }); }
       finally { worker.close(); }
     }
   },
