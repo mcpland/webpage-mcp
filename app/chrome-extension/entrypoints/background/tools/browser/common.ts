@@ -299,6 +299,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
         readingFrames.add(frameId);
         void Promise.all([baseline, readFrameHistory(tabId, frameId, 'current', frameSignal)])
           .then(([previous, current]) => {
+            if (!current && previous) {
+              updatedFrames.add(frameId); // A transient read error does not invalidate the browser event.
+              return;
+            }
             const entry = current?.result;
             if (Array.isArray(entry) && Array.isArray(previous?.result)) {
               if (previous.result.includes(entry[0])) childTraversed = true;
@@ -331,11 +335,15 @@ class NavigateTool extends BaseBrowserToolExecutor {
           const readJointHistory = childUpdated && destinations?.size;
           childUpdated = false;
           const history = readJointHistory ? await readTabHistory(tabId, signal) : undefined;
-          if (history && destinations) {
-            const entry = history.entries[history.currentIndex];
-            childTraversed ||= entry !== undefined && destinations.has(entry.id);
-          } else {
-            checkUpdatedFrames(changedFrames);
+          const entry = history?.entries[history.currentIndex];
+          if (entry && destinations) childTraversed ||= destinations.has(entry.id);
+          // A stale snapshot at the starting entry is inconclusive. Movement to a
+          // different known entry in the opposite direction contradicts this event.
+          const contradictsDirection = entry && before && before.entries.some((item, index) =>
+            item.id === entry.id && (direction === 'back' ? index > before.currentIndex : index < before.currentIndex));
+          if (!childTraversed && !contradictsDirection) {
+            // A newer event for the same frame already has a joint-history read queued.
+            checkUpdatedFrames(changedFrames.filter(frameId => !updatedFrames.has(frameId)));
           }
         }
         if (topTraversed || (current.url && childTraversed)) {

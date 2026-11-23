@@ -1216,6 +1216,57 @@ describe('navigateTool', () => {
     }
   });
 
+  it.each(['stale joint snapshot', 'failed frame read'])('rechecks the opaque frame after a %s', async fault => {
+    const event = { addListener: vi.fn(), removeListener: vi.fn() };
+    const stale = { currentIndex: 1, entries: [{ id: 1 }, { id: 2 }] };
+    const history = vi.spyOn(cdpSessionManager, 'sendCommand');
+    if (fault === 'stale joint snapshot') history.mockResolvedValue(stale);
+    else history.mockRejectedValue(new Error('external debugger'));
+    let reads = 0;
+    const executeScript = vi.fn(async ({ args }) => {
+      if (args[0] === 'current' && ++reads === 1 && fault === 'failed frame read') throw Error('frame busy');
+      return [{ frameId: 9, documentId: 'child', result: args[0] === 'current' ? 1 : 0 }];
+    });
+    Object.assign(chrome, { scripting: { executeScript }, webNavigation: {
+      onHistoryStateUpdated: event, getAllFrames: async () => [{ frameId: 9 }],
+    } });
+    mocks.tabsGoBack.mockImplementation(async () => event.addListener.mock.calls[0][0]({
+      tabId: makeTab().id, frameId: 9, documentId: 'child', transitionType: 'auto_subframe',
+    }));
+    try {
+      expect((await navigateTool.execute({ url: 'back', waitUntil: 'commit' })).isError).toBe(false);
+      expect(reads).toBe(fault === 'failed frame read' ? 2 : 1);
+    } finally {
+      history.mockRestore();
+    }
+  });
+
+  it('does not confirm an opaque popstate when joint history moved in the opposite direction', async () => {
+    const event = { addListener: vi.fn(), removeListener: vi.fn() };
+    const entries = [{ id: 1 }, { id: 2 }, { id: 3 }];
+    const history = vi.spyOn(cdpSessionManager, 'sendCommand')
+      .mockResolvedValueOnce({ currentIndex: 1, entries })
+      .mockResolvedValue({ currentIndex: 2, entries });
+    const controller = new AbortController();
+    const executeScript = vi.fn(async ({ args }) => [{ frameId: 9, documentId: 'child', result: args[0] === 'current' ? 1 : 0 }]);
+    Object.assign(chrome, { scripting: { executeScript }, webNavigation: {
+      onHistoryStateUpdated: event, getAllFrames: async () => [{ frameId: 9 }],
+    } });
+    mocks.tabsGoBack.mockImplementation(async () => event.addListener.mock.calls[0][0]({
+      tabId: makeTab().id, frameId: 9, documentId: 'child', transitionType: 'auto_subframe',
+    }));
+    try {
+      const run = navigateTool.execute({ url: 'back', waitUntil: 'commit' }, { signal: controller.signal });
+      await vi.waitFor(() => expect(history).toHaveBeenCalledTimes(2));
+      await new Promise(resolve => setTimeout(resolve, 150));
+      controller.abort();
+      expect((await run).isError).toBe(true);
+      expect(executeScript.mock.calls.some(([options]) => options.args[0] === 'current')).toBe(false);
+    } finally {
+      history.mockRestore();
+    }
+  });
+
   it('reads joint history again when a child event arrives before a stale snapshot is delivered', async () => {
     const event = { addListener: vi.fn(), removeListener: vi.fn() };
     Object.assign(chrome, { webNavigation: {
