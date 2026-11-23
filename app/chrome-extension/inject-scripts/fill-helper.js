@@ -99,8 +99,14 @@ if (window.__FILL_HELPER_INITIALIZED__) {
    * @param {boolean} [keepFocus] leave the field focused (no blur) so a
    *   following Enter key press lands in it, as when a user types and submits.
    */
-  async function fillElement(selector, value, ref = null, keepFocus = false, submitToken) {
+  async function fillElement(selector, value, ref = null, keepFocus = false, submitToken, deadlineAt, permit) {
     try {
+      const checkInput = async () => {
+        if (permit && await chrome.runtime.sendMessage({ action: 'checkBrowserInput', permit }) !== true)
+          throw new Error('Fill operation cancelled');
+        if (deadlineAt !== undefined && Date.now() >= deadlineAt) throw new Error('Fill operation timed out');
+      };
+      await checkInput();
       // Find the element
       let element = null;
       if (ref && typeof ref === 'string') {
@@ -245,10 +251,16 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         };
       }
 
+      await checkInput();
       pendingSubmit = submitToken ? { token: submitToken, element: new WeakRef(element) } : undefined;
       // Focus the element
       element.focus();
+      await checkInput();
 
+      const emit = async (type) => {
+        await checkInput();
+        element.dispatchEvent(new Event(type, { bubbles: true }));
+      };
       // Type-specific handling for tricky inputs first
       if (element.tagName === 'INPUT' && element.type === 'checkbox') {
         // Accept boolean or string-like boolean
@@ -270,9 +282,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         const previous = element.checked;
         element.checked = checkedVal;
         element.focus();
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-        if (!keepFocus) element.blur();
+        await emit('input');
+        await emit('change');
+        if (!keepFocus) { await checkInput(); element.blur(); }
         return {
           success: true,
           message: `Checkbox set to ${element.checked}`,
@@ -285,9 +297,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         const previous = element.checked;
         element.checked = true;
         element.focus();
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-        if (!keepFocus) element.blur();
+        await emit('input');
+        await emit('change');
+        if (!keepFocus) { await checkInput(); element.blur(); }
         return {
           success: true,
           message: 'Radio selected',
@@ -308,9 +320,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         const previous = element.value;
         element.value = String(numericValue);
         element.focus();
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-        if (!keepFocus) element.blur();
+        await emit('input');
+        await emit('change');
+        if (!keepFocus) { await checkInput(); element.blur(); }
         return {
           success: true,
           message: `Set range to ${element.value} (min: ${element.min}, max: ${element.max})`,
@@ -325,9 +337,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         const previous = element.value;
         element.value = String(value ?? '');
         element.focus();
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-        if (!keepFocus) element.blur();
+        await emit('input');
+        await emit('change');
+        if (!keepFocus) { await checkInput(); element.blur(); }
         return {
           success: true,
           message: `Set number input to ${element.value} (previous: ${previous})`,
@@ -355,21 +367,22 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         }
 
         // Trigger change event
-        element.dispatchEvent(new Event('change', { bubbles: true }));
+        await emit('change');
       } else {
         // For input and textarea elements
         // Clear the current value then set new value
         element.value = '';
-        element.dispatchEvent(new Event('input', { bubbles: true }));
+        await emit('input');
 
+        await checkInput();
         element.value = String(value);
 
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
+        await emit('input');
+        await emit('change');
       }
 
       // Blur the element (like a user leaving the field) unless a submit follows
-      if (!keepFocus) element.blur();
+      if (!keepFocus) { await checkInput(); element.blur(); }
 
       return {
         success: true,
@@ -454,7 +467,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
   // Listen for messages from the extension
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.action === 'fillElement') {
-      fillElement(request.selector, request.value, request.ref, request.keepFocus === true, request.submitToken)
+      fillElement(request.selector, request.value, request.ref, request.keepFocus === true, request.submitToken, request.deadlineAt, request.permit)
         .then(sendResponse)
         .catch((error) => {
           sendResponse({

@@ -61,6 +61,8 @@ export const keyHandler: ActionHandler<'key'> = {
   },
 
   run: async (ctx, action) => {
+    const input = { signal: ctx.signal, deadlineAt: ctx.execution?.deadlineAt };
+    input.signal?.throwIfAborted();
     const vars = ctx.vars;
     const tabId = ctx.tabId;
 
@@ -87,7 +89,7 @@ export const keyHandler: ActionHandler<'key'> = {
     // Handle optional target focusing
     const target = action.params.target as ElementTarget | undefined;
     if (target) {
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, ...input, args: { tabId, frameId: ctx.frameId } });
 
       const {
         selectorTarget,
@@ -102,6 +104,7 @@ export const keyHandler: ActionHandler<'key'> = {
         verifyFingerprint: true,
       });
 
+      input.signal?.throwIfAborted();
       frameId = located?.frameId ?? ctx.frameId;
       const refToUse = located?.ref ?? selectorTarget.ref;
 
@@ -118,9 +121,10 @@ export const keyHandler: ActionHandler<'key'> = {
           return failed('ELEMENT_NOT_VISIBLE', 'Target element is not visible');
         }
 
+        input.signal?.throwIfAborted();
         const focusResult = await sendMessageToTab<{ success?: boolean; error?: string }>(
           tabId,
-          { action: 'focusByRef', ref: located.ref },
+          { action: 'focusByRef', ref: located.ref, deadlineAt: input.deadlineAt },
           frameId,
         );
 
@@ -162,7 +166,9 @@ export const keyHandler: ActionHandler<'key'> = {
     }
 
     // Execute keyboard input
+    input.signal?.throwIfAborted();
     const keyboardResult = await handleCallTool({
+      ...input,
       name: TOOL_NAMES.BROWSER.KEYBOARD,
       args: {
         keys,

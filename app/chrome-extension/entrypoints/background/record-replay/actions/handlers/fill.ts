@@ -45,6 +45,8 @@ export const fillHandler: ActionHandler<'fill'> = {
   },
 
   run: async (ctx, action) => {
+    const input = { signal: ctx.signal, deadlineAt: ctx.execution?.deadlineAt };
+    input.signal?.throwIfAborted();
     const vars = ctx.vars;
     const tabId = ctx.tabId;
 
@@ -53,7 +55,7 @@ export const fillHandler: ActionHandler<'fill'> = {
     }
 
     // Ensure page is read before locating element
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId, frameId: ctx.frameId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, ...input, args: { tabId, frameId: ctx.frameId } });
 
     // Resolve fill value
     const valueResolved = resolveString(action.params.value, vars);
@@ -74,6 +76,7 @@ export const fillHandler: ActionHandler<'fill'> = {
       verifyFingerprint: true,
     });
 
+    input.signal?.throwIfAborted();
     const frameId = located?.frameId ?? ctx.frameId;
     const refToUse = located?.ref ?? selectorTarget.ref;
     const cssSelector = !located?.ref ? firstCssOrAttr : undefined;
@@ -108,7 +111,9 @@ export const fillHandler: ActionHandler<'fill'> = {
             'Public flow runs cannot upload local files to file inputs',
           );
         }
+        input.signal?.throwIfAborted();
         const uploadResult = await uploadLocalFileToInputInternal({
+          signal: input.signal,
           selector: selectorForTypeCheck,
           filePath: value,
           tabId,
@@ -135,38 +140,10 @@ export const fillHandler: ActionHandler<'fill'> = {
       }
     }
 
-    // Scroll element into view (best-effort)
-    if (cssSelector) {
-      try {
-        await handleCallTool({
-          name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
-          args: {
-            type: 'MAIN',
-            jsScript: `try{var el=document.querySelector(${JSON.stringify(cssSelector)});if(el){el.scrollIntoView({behavior:'instant',block:'center',inline:'nearest'});}}catch(e){}`,
-            tabId,
-          },
-        });
-      } catch {
-        // Ignore scroll errors
-      }
-    }
-
-    // Focus element (best-effort, ignore errors)
-    if (located?.ref) {
-      await sendMessageToTab(tabId, { action: 'focusByRef', ref: located.ref }, frameId);
-    } else if (cssSelector) {
-      await handleCallTool({
-        name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
-        args: {
-          type: 'MAIN',
-          jsScript: `try{var el=document.querySelector(${JSON.stringify(cssSelector)});if(el&&el.focus){el.focus();}}catch(e){}`,
-          tabId,
-        },
-      });
-    }
-
     // Execute fill
+    input.signal?.throwIfAborted();
     const fillResult = await handleCallTool({
+      ...input,
       name: TOOL_NAMES.BROWSER.FILL,
       args: {
         ref: refToUse,

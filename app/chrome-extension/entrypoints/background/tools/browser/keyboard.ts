@@ -4,6 +4,7 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { hasDisallowedPublicUrlScheme } from './common';
+import { inputSignal, withInputPermit, type BrowserInputContext } from '@/utils/browser-input';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { dispatchKeyStroke, parseKeyboardInput, type KeyboardStep } from '@/utils/cdp-keyboard';
 import {
@@ -49,17 +50,18 @@ export async function dispatchKeySequence(
   keys: string,
   delay: number,
   signal?: AbortSignal,
+  callerSignal?: AbortSignal,
 ): Promise<void> {
   const steps = parseKeyboardInput(keys);
   const dispatch = (event: Record<string, unknown>) =>
-    cdpSessionManager.sendCommand(tabId, 'Input.dispatchKeyEvent', event);
+    cdpSessionManager.sendCommand(tabId, 'Input.dispatchKeyEvent', event, ...(callerSignal ? [callerSignal] : []));
   for (let index = 0; index < steps.length; index += 1) {
     if (signal?.aborted) return;
     const step = steps[index];
     if (step.kind === 'text') {
       await cdpSessionManager.sendCommand(tabId, 'Input.insertText', {
         text: step.text,
-      });
+      }, ...(callerSignal ? [callerSignal] : []));
     } else {
       await dispatchKeyStroke(dispatch, step.stroke, { signal });
     }
@@ -80,17 +82,21 @@ export async function pressKeysOnFocusedElement(
   keys: string,
   focusTarget: () => Promise<void>,
   dialog?: DialogResponse,
+  callerSignal?: AbortSignal,
 ): Promise<CdpInputResult & { submitted: boolean }> {
   let submitted = false;
   const input = await runCdpInputWithDialogs(
     tabId,
     'keyboard',
-    async (signal) => {
+    async (dialogSignal) => {
+      const signal = callerSignal ? AbortSignal.any([dialogSignal, callerSignal]) : dialogSignal;
+      callerSignal?.throwIfAborted();
       await focusTarget();
+      callerSignal?.throwIfAborted();
       if (signal.aborted) return;
       // A dialog may interrupt focus before Enter, or be opened by Enter itself.
       submitted = true;
-      await dispatchKeySequence(tabId, keys, 0, signal);
+      await dispatchKeySequence(tabId, keys, 0, signal, callerSignal);
     },
     { dialog },
   );
@@ -108,24 +114,25 @@ class KeyboardTool extends BaseBrowserToolExecutor {
     keys: string,
     steps: KeyboardStep[],
     delay: number,
-    options: { selector?: string; focusedByRef?: boolean; frameId?: number; submitToken?: string; dialog?: DialogResponse } = {},
+    options: { selector?: string; focusedByRef?: boolean; frameId?: number; submitToken?: string; dialog?: DialogResponse } & BrowserInputContext = {},
   ): Promise<ToolResult> {
     const { selector, focusedByRef, frameId, dialog } = options;
     if (dialog) {
       return createErrorResponse('Automatic dialog responses require a debugger connection. No fallback keys were sent.');
     }
     const timeoutMs = 5000 + Math.max(0, delay) * Math.max(0, steps.length - 1);
-    const deadline = Date.now() + timeoutMs;
+    const deadline = Math.min(Date.now() + timeoutMs, options.deadlineAt ?? Infinity);
     try {
       const frames = typeof frameId === 'number' ? [frameId] : undefined;
       const dispatch = async () => {
         await this.injectContentScript(tabId, ['inject-scripts/keyboard-helper.js'], false, 'ISOLATED', false, frames);
         if (Date.now() >= deadline) throw new Error('Keyboard helper timed out before dispatch');
-        return this.sendMessageToTab(tabId, {
+        return withInputPermit(tabId, frameId, options.signal, permit => this.sendMessageToTab(tabId, {
+          ...(permit ? { permit } : {}),
           action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD, keys, steps,
           selector: focusedByRef ? undefined : selector, delay, deadline,
           ...(options.submitToken ? { submitToken: options.submitToken } : {}),
-        }, frameId);
+        }, frameId));
       };
       const result = await withTimeout(dispatch(), timeoutMs, 'Keyboard helper');
       if (!result?.success || result.error) {
@@ -148,7 +155,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
   /**
    * Execute keyboard operation
    */
-  async execute(args: KeyboardToolParams): Promise<ToolResult> {
+  async execute(args: KeyboardToolParams, context?: BrowserInputContext): Promise<ToolResult> {
     const {
       keys,
       selector,
@@ -170,6 +177,8 @@ class KeyboardTool extends BaseBrowserToolExecutor {
     }
 
     try {
+      const callerSignal = inputSignal(context);
+      callerSignal?.throwIfAborted();
       const explicit = await this.tryGetTab(args.tabId);
       let tab =
         explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
@@ -183,6 +192,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
           'Only http:// and https:// pages are supported by chrome_keyboard',
         );
       }
+      callerSignal?.throwIfAborted();
       if (args.background !== true) {
         tab = await this.activateTabIfNeeded(tab);
       }
@@ -256,11 +266,13 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         }
       }
 
+      callerSignal?.throwIfAborted();
       if (refForFocus) {
         const focusResult = await this.sendMessageToTab(
           targetTabId,
           {
             action: 'focusByRef',
+            ...(context?.deadlineAt !== undefined ? { deadlineAt: context.deadlineAt } : {}),
             ref: refForFocus,
           },
           targetFrameId,
@@ -277,10 +289,12 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         input = await runCdpInputWithDialogs(
           targetTabId,
           'keyboard',
-          (signal) => dispatchKeySequence(targetTabId, keys, delay, signal),
+          (signal) => dispatchKeySequence(targetTabId, keys, delay, callerSignal ? AbortSignal.any([callerSignal, signal]) : signal, callerSignal),
           { dialog: dialogResponse },
         );
+        callerSignal?.throwIfAborted();
       } catch (cdpError) {
+        callerSignal?.throwIfAborted();
         if (cdpError instanceof PageUnresponsiveError) {
           return createErrorResponse(cdpError.message);
         }
@@ -295,7 +309,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         );
         return this.sendHelperSteps(
           targetTabId, keys, parseKeyboardInput(keys), delay,
-          { selector: finalSelector, focusedByRef: !!refForFocus, frameId: targetFrameId, dialog: dialogResponse },
+          { signal: callerSignal, deadlineAt: context?.deadlineAt, selector: finalSelector, focusedByRef: !!refForFocus, frameId: targetFrameId, dialog: dialogResponse },
         );
       }
 

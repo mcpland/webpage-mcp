@@ -569,6 +569,18 @@ describe('interaction tools', () => {
     expect(injectContentScript).not.toHaveBeenCalled();
   });
 
+  it('does not submit if the caller cancels while the filled field regains focus', async () => {
+    const controller = new AbortController();
+    vi.spyOn(fillTool as any, 'sendMessageToTab').mockImplementation(async () => {
+      controller.abort();
+      return { success: true };
+    });
+    await expect(fillTool.submitFilledElement(7, 0, 'filled', undefined, {
+      signal: controller.signal,
+    })).rejects.toThrow();
+    expect(mocks.sendCommand.mock.calls.some(([, method]) => method === 'Input.dispatchKeyEvent')).toBe(false);
+  });
+
   it('falls back to keyboard helper for fill submit when CDP is unavailable', async () => {
     vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue(
       makeTab({ url: 'https://example.com/' }),

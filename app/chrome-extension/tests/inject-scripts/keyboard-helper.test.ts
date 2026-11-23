@@ -195,6 +195,23 @@ describe('keyboard-helper page protocol', () => {
     expect((await sendKeys(listener, 'hello')).success).toBe(false);
   });
 
+  it('checks cancellation after keydown before dispatching keypress or activating the button', async () => {
+    document.body.innerHTML = '<button>Activate</button>';
+    const button = document.querySelector('button')!;
+    button.focus();
+    let live = true;
+    button.onkeydown = () => { live = false; };
+    button.onclick = vi.fn();
+    button.onkeypress = vi.fn();
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation(async () => live);
+    const result = await dispatch(executeHelper(), {
+      action: 'simulateKeyboard', keys: 'Enter', steps: parseKeyboardInput('Enter'), permit: 'permit',
+    });
+    expect(result.success).toBe(false);
+    expect(button.onkeypress).not.toHaveBeenCalled();
+    expect(button.onclick).not.toHaveBeenCalled();
+  });
+
   it('abandons the edit if a beforeinput listener returns after the deadline', async () => {
     const field = document.createElement('input');
     document.body.append(field);

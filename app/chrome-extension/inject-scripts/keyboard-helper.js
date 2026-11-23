@@ -143,7 +143,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
    * @param {Element} element - Target element.
    * @returns {{success: boolean, error?: string}}
    */
-  function dispatchKeyEvents(parsedKeyInfo, element, edit, deadline) {
+  async function dispatchKeyEvents(parsedKeyInfo, element, edit, checkInput) {
     if (!parsedKeyInfo) return { success: false, error: 'Invalid key info provided for dispatch.' };
 
     const { key, code, keyCode, charCode, modifiers } = parsedKeyInfo;
@@ -169,6 +169,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       // and it's a character producing key.
       const commandHeld = Boolean(modifiers?.ctrlKey || modifiers?.metaKey || modifiers?.altKey);
       if (allowEdit && !commandHeld && (key.length === 1 || key === 'Enter' || key === ' ')) {
+        await checkInput();
         const keypressOptions = { ...eventOptions };
         if (charCode) keypressOptions.charCode = charCode;
         allowEdit = element.dispatchEvent(new KeyboardEvent('keypress', keypressOptions));
@@ -176,25 +177,20 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
 
       const activateOnRelease = key === ' ' && !commandHeld && element.matches(SPACE_CONTROL_SELECTOR);
       let releaseAllowed = false;
-      let expired = false;
       try {
-        if (Date.now() >= deadline) {
-          expired = true;
-          throw new Error('Keyboard operation expired');
-        }
-        if (allowEdit && !activateOnRelease) edit?.();
+        await checkInput();
+        if (allowEdit && !activateOnRelease) await edit?.();
       } finally {
-        if (!expired && !(Date.now() >= deadline)) {
-          const releaseTarget = focusedElement();
-          releaseAllowed =
-            Boolean(releaseTarget) &&
-            releaseTarget.dispatchEvent(new KeyboardEvent('keyup', eventOptions)) &&
-            releaseTarget === element;
-        }
+        await checkInput();
+        const releaseTarget = focusedElement();
+        releaseAllowed =
+          Boolean(releaseTarget) &&
+          releaseTarget.dispatchEvent(new KeyboardEvent('keyup', eventOptions)) &&
+          releaseTarget === element;
       }
       if (activateOnRelease && allowEdit && releaseAllowed && focusedElement() === element) {
-        if (Date.now() >= deadline) throw new Error('Keyboard operation expired');
-        edit?.();
+        await checkInput();
+        await edit?.();
       }
       return { success: true };
     } catch (error) {
@@ -320,7 +316,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
        ['text', 'search', 'url', 'tel', 'email', 'password', 'number'].includes(element.type));
   }
 
-  function editText(element, command, data, deadline) {
+  async function editText(element, command, data, checkInput) {
     if (!isTextField(element) || element.readOnly || element.matches(':disabled')) {
       throw new Error('The focused element is not editable');
     }
@@ -333,14 +329,14 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       bubbles: true, composed: true, cancelable: true, inputType: inputTypes[command], data: data ?? null,
     }));
     if (!allowed) return;
-    if (Date.now() >= deadline) throw new Error('Keyboard operation expired');
+    await checkInput();
     if (focusedElement() !== element) throw new Error('The editing target lost focus');
     if (!document.execCommand(command, false, data)) {
       throw new Error('The focused element did not accept the editing command: ' + command);
     }
   }
 
-  function applyEdit(element, key, modifiers, text, deadline) {
+  async function applyEdit(element, key, modifiers, text, checkInput) {
     if (key === 'Tab' && !modifiers.ctrlKey && !modifiers.altKey && !modifiers.metaKey) {
       moveTabFocus(element, modifiers.shiftKey);
       return;
@@ -389,14 +385,14 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     if (command === 'selectAll') {
       if (!document.execCommand(command)) throw new Error('Could not select the field contents');
     } else if (command) {
-      editText(element, command, text, deadline);
+      await editText(element, command, text, checkInput);
     }
   }
 
-  function dispatchStep(step, element, deadline) {
+  async function dispatchStep(step, element, checkInput) {
     if (step.kind === 'text') {
       // Match Input.insertText: the editor can veto the entire literal insertion.
-      editText(element, 'insertText', step.text, deadline);
+      await editText(element, 'insertText', step.text, checkInput);
       return { success: true };
     }
     const { key: definition, modifiers: names } = step.stroke;
@@ -404,7 +400,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     const key = (modifiers.shiftKey && definition.shiftKey) || definition.key;
     const text = definition.text !== undefined && key !== 'Enter' ? key : undefined;
     return dispatchKeyEvents({ ...definition, key, modifiers }, element,
-      () => applyEdit(element, key, modifiers, text, deadline), deadline);
+      () => applyEdit(element, key, modifiers, text, checkInput), checkInput);
   }
 
   /**
@@ -414,8 +410,17 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
    * @param {number} delay - Delay between key sequences in milliseconds (optional)
    * @returns {Promise<Object>} - Result of the keyboard operation
    */
-  async function simulateKeyboard(keysSequenceString, targetElement = null, delay = 0, steps, deadline) {
+  async function simulateKeyboard(keysSequenceString, targetElement = null, delay = 0, steps, deadline, permit, submitToken) {
     try {
+      const checkInput = async () => {
+        if (permit && await chrome.runtime.sendMessage({ action: 'checkBrowserInput', permit }) !== true)
+          throw new Error('Keyboard operation cancelled');
+        if (Date.now() >= deadline) throw new Error('Keyboard operation expired');
+      };
+      await checkInput();
+      if (submitToken && !window.__webpageFocusFilledTarget?.(submitToken)) {
+        throw new Error('The filled field could not retain focus for submit');
+      }
       const active = focusedElement();
       const element = targetElement || active;
       if (element !== active && typeof element.focus === 'function') {
@@ -430,12 +435,12 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       const operationResults = [];
 
       for (let i = 0; i < keyCombinations.length; i++) {
-        if (Date.now() >= deadline) throw new Error('Keyboard operation expired');
+        await checkInput();
         const step = keyCombinations[i];
         const comboString = steps ? (step.token ?? step.text) : step;
         const dispatchResult = steps
-          ? dispatchStep(step, focusedElement(), deadline)
-          : dispatchKeyEvents(parseSingleKeyCombination(comboString), element);
+          ? await dispatchStep(step, focusedElement(), checkInput)
+          : await dispatchKeyEvents(parseSingleKeyCombination(comboString), element, undefined, checkInput);
         operationResults.push({
           keyCombination: comboString,
           ...dispatchResult,
@@ -478,10 +483,6 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
   // Listener for messages from the extension
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.action === 'simulateKeyboard') {
-      if (request.submitToken && !window.__webpageFocusFilledTarget?.(request.submitToken)) {
-        sendResponse({ success: false, error: 'The filled field could not retain focus for submit' });
-        return false;
-      }
       let targetEl = null;
       if (request.selector) {
         targetEl = document.querySelector(request.selector);
@@ -495,7 +496,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
         }
       }
 
-      simulateKeyboard(request.keys, targetEl, request.delay, request.steps, request.deadline)
+      simulateKeyboard(request.keys, targetEl, request.delay, request.steps, request.deadline, request.permit, request.submitToken)
         .then(sendResponse)
         .catch((error) => {
           // This catch is for unexpected errors in simulateKeyboard promise chain itself

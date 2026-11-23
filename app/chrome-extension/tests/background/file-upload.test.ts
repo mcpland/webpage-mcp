@@ -179,7 +179,7 @@ describe('fileUploadTool', () => {
     expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'DOM.setFileInputFiles', {
       nodeId: 2,
       files: ['/tmp/prepared-upload.txt'],
-    });
+    }, undefined);
     expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'DOM.getDocument', {
       depth: 0,
       pierce: true,

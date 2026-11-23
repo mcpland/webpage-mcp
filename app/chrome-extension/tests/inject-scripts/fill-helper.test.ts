@@ -126,6 +126,18 @@ describe('fill-helper bounded shadow search', () => {
     expect(document.activeElement).toBe(field);
   });
 
+  it('rechecks cancellation after the first input event before writing the requested value', async () => {
+    document.body.innerHTML = '<input id="field" value="initial">';
+    const field = document.querySelector<HTMLInputElement>('#field')!;
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => field });
+    let live = true;
+    field.oninput = () => { live = false; };
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation(async () => live);
+    const result = await dispatch(loadHelper(), { action: 'fillElement', selector: '#field', value: 'late', permit: 'permit' });
+    expect(result.error).toContain('cancelled');
+    expect(field.value).toBe('');
+  });
+
   it('refocuses the exact filled control if an input handler moved focus before submit', async () => {
     document.body.innerHTML = '<form><input id="one"></form><form><input id="two"></form>';
     const field = document.querySelector<HTMLInputElement>('#one')!;

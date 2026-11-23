@@ -2338,6 +2338,10 @@
         }
       }
       if (request && request.action === 'focusByRef') {
+        if (Date.now() >= request.deadlineAt) {
+          sendResponse({ success: false, error: 'Focus operation timed out' });
+          return false;
+        }
         try {
           const ref = normalizeTargetInput(request.ref, 'ref', 128);
           const map = window.__claudeElementMap || {};

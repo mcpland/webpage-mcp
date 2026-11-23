@@ -4,7 +4,7 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { hasDisallowedPublicUrlScheme } from './common';
-import { inputSignal, withInputPermit } from '@/utils/browser-input';
+import { inputSignal, withInputPermit, type BrowserInputContext } from '@/utils/browser-input';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
   CdpUnavailableError,
@@ -644,17 +644,17 @@ interface FillToolParams {
 class FillTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.FILL;
 
-  async submitFilledElement(tabId: number, frameId: number | undefined, token: string, dialog?: DialogResponse): Promise<CdpInputResult & { submitted: boolean }> {
+  async submitFilledElement(tabId: number, frameId: number | undefined, token: string, dialog?: DialogResponse, context?: BrowserInputContext): Promise<CdpInputResult & { submitted: boolean }> {
     const focusTarget = async () => {
       const result = await this.sendMessageToTab(tabId, { action: 'focusFilledTarget', submitToken: token }, frameId);
       if (!result?.success) throw new Error('The filled field could not retain focus for submit');
     };
     try {
-      return await pressKeysOnFocusedElement(tabId, 'Enter', focusTarget, dialog);
+      return await pressKeysOnFocusedElement(tabId, 'Enter', focusTarget, dialog, context?.signal);
     } catch (error) {
       if (!(error instanceof CdpUnavailableError) || dialog) throw error;
       const fallback = await keyboardTool.sendHelperSteps(tabId, 'Enter', parseKeyboardInput('Enter'), 0, {
-        frameId, submitToken: token,
+        ...context, frameId, submitToken: token,
       });
       if (fallback.isError) throw new Error(fallback.content.find((block) => block.type === 'text')?.text || 'submit failed');
       return { submitted: true };
@@ -664,7 +664,7 @@ class FillTool extends BaseBrowserToolExecutor {
   /**
    * Execute fill operation
    */
-  async execute(args: FillToolParams): Promise<ToolResult> {
+  async execute(args: FillToolParams, context?: BrowserInputContext): Promise<ToolResult> {
     const { selectorType = 'css', value } = args;
     let selector: string | undefined;
     let ref: string | undefined;
@@ -701,6 +701,8 @@ class FillTool extends BaseBrowserToolExecutor {
     }
 
     try {
+      const signal = inputSignal(context);
+      signal?.throwIfAborted();
       const explicit = await this.tryGetTab(args.tabId);
       let tab =
         explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
@@ -714,6 +716,7 @@ class FillTool extends BaseBrowserToolExecutor {
           'Only http:// and https:// pages are supported by chrome_fill_or_select',
         );
       }
+      signal?.throwIfAborted();
       if (args.background !== true) {
         tab = await this.activateTabIfNeeded(tab);
       }
@@ -767,10 +770,12 @@ class FillTool extends BaseBrowserToolExecutor {
 
       const submitToken = args.submit === true ? crypto.randomUUID() : args.submitToken;
       // Send fill message to content script
-      const result = await this.sendMessageToTab(
+      const result = await withInputPermit(targetTabId, frameId, signal, permit => this.sendMessageToTab(
         targetTabId,
         {
           action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
+          ...(permit ? { permit } : {}),
+          ...(context?.deadlineAt !== undefined ? { deadlineAt: context.deadlineAt } : {}),
           selector: finalSelector,
           ref: finalRef,
           value,
@@ -778,8 +783,9 @@ class FillTool extends BaseBrowserToolExecutor {
           ...(args.submit === true || args.keepFocus === true ? { keepFocus: true } : {}),
         },
         frameId,
-      );
+      ));
 
+      signal?.throwIfAborted();
       if (result && result.error) {
         return createErrorResponse(result.error);
       }
@@ -787,7 +793,7 @@ class FillTool extends BaseBrowserToolExecutor {
       let submitInput: Awaited<ReturnType<typeof this.submitFilledElement>> | undefined;
       if (args.submit === true && submitToken) {
         try {
-          submitInput = await this.submitFilledElement(targetTabId, frameId, submitToken, dialogResponse);
+          submitInput = await this.submitFilledElement(targetTabId, frameId, submitToken, dialogResponse, { signal, deadlineAt: context?.deadlineAt });
         } catch (error) {
           return createErrorResponse(`The field was filled, but pressing Enter to submit failed: ${error instanceof Error ? error.message : String(error)}`);
         }

@@ -17,6 +17,7 @@ interface FileUploadToolParams {
 }
 
 interface InternalLocalFileUploadParams {
+  signal?: AbortSignal;
   selector: string;
   filePath: string;
   multiple?: boolean;
@@ -208,6 +209,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
           windowId: args.windowId,
         },
         [filePath],
+        args.signal,
       );
     } catch (error) {
       console.error('Error in internal file upload operation:', error);
@@ -222,6 +224,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
   private async uploadPreparedFiles(
     args: Pick<FileUploadToolParams, 'selector' | 'multiple' | 'tabId' | 'windowId'>,
     files: string[],
+    signal?: AbortSignal,
   ): Promise<ToolResult> {
     const { selector, tabId: targetTabId, windowId } = args;
 
@@ -292,7 +295,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
         await cdpSessionManager.sendCommand(tabId, 'DOM.setFileInputFiles', {
           nodeId,
           files,
-        });
+        }, signal);
 
         await cdpSessionManager.sendCommand(tabId, 'Runtime.callFunctionOn', {
           objectId,
@@ -301,7 +304,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
             return true;
           }`,
           returnByValue: true,
-        });
+        }, signal);
       } finally {
         await cdpSessionManager
           .sendCommand(tabId, 'Runtime.releaseObject', { objectId })

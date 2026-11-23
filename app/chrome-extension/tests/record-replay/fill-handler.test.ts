@@ -25,6 +25,7 @@ vi.mock('@/shared/selector', async (importOriginal) => {
   };
 });
 
+import { keyHandler } from '@/entrypoints/background/record-replay/actions/handlers/key';
 import { fillHandler } from '@/entrypoints/background/record-replay/actions/handlers/fill';
 
 describe('fillHandler local file restrictions', () => {
@@ -58,6 +59,20 @@ describe('fillHandler local file restrictions', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it.each([fillHandler, keyHandler])('cancels $type before dispatch when target resolution outlives the run', async handler => {
+    const controller = new AbortController();
+    mocks.locate.mockImplementation(async () => {
+      controller.abort();
+      return { ref: 'field', resolvedBy: 'css' };
+    });
+    const run = handler.run({ tabId: 11, vars: {}, log: vi.fn(), signal: controller.signal } as any, {
+      id: 'input', params: { target: { selector: '#field' }, keys: 'Enter', value: 'value' },
+    } as any);
+    await expect(run).rejects.toThrow();
+    expect(mocks.handleCallTool.mock.calls.map(([call]) => call.name)).toEqual(['chrome_read_page']);
+    expect(mocks.uploadLocalFileToInputInternal).not.toHaveBeenCalled();
   });
 
   it('rejects file inputs when the run disallows local file uploads', async () => {
