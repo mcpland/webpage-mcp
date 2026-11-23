@@ -4,6 +4,7 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { ERROR_MESSAGES, TIMEOUTS } from '@/common/constants';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { clickTool, fillTool } from './interaction';
+import { runInNativeKeyQueue } from '../../tab-queue';
 import { dispatchKeySequence, keyboardTool } from './keyboard';
 
 /** Select everything in the focused field, then delete it (Ctrl+A is Select All on macOS too). */
@@ -1350,7 +1351,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               for (let i = 0; i < repeat; i++) {
                 for (const stroke of strokes) {
                   if (signal.aborted) return;
-                  await dispatchKeyStroke(dispatch, stroke, { signal });
+                  await runInNativeKeyQueue(tab.id!, () => dispatchKeyStroke(dispatch, stroke, { signal }), signal);
                 }
               }
             },

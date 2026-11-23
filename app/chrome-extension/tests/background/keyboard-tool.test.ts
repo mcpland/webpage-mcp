@@ -16,7 +16,7 @@ vi.mock('@/utils/cdp-session-manager', () => ({
   },
 }));
 
-import { keyboardTool } from '@/entrypoints/background/tools/browser/keyboard';
+import { dispatchKeySequence, keyboardTool } from '@/entrypoints/background/tools/browser/keyboard';
 
 function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
@@ -39,6 +39,70 @@ describe('keyboardTool', () => {
     mocks.sendCommand.mockReset();
     mocks.executeScript.mockReset();
     mocks.tabsSendMessage.mockReset();
+  });
+
+  it.each(['after submission', 'before submission', 'replacement document', 'primary key'])('balances only delivered modifiers on cancellation %s', async phase => {
+    const controller = new AbortController();
+    const getFrame = vi.fn().mockResolvedValueOnce({ documentId: 'first' }).mockResolvedValue({
+      documentId: phase === 'replacement document' ? 'next' : 'first',
+    });
+    vi.stubGlobal('chrome', { webNavigation: { getFrame } });
+    const events: string[] = [];
+    mocks.sendCommand.mockImplementation(async (_tab, _method, event, signal, submitted) => {
+      if (event.type === 'keyUp') {
+        expect(signal.aborted).toBe(false);
+        events.push('up:' + event.key);
+        return {};
+      }
+      if (phase !== 'before submission') { submitted?.(); events.push('down:' + event.key); }
+      if (phase === 'before submission' || (phase === 'primary key' ? event.code === 'KeyA' : event.key === 'Shift')) {
+        controller.abort();
+        throw controller.signal.reason;
+      }
+      return {};
+    });
+    await expect(dispatchKeySequence(7, 'Ctrl+Shift+A', 0, controller.signal, controller.signal)).rejects.toThrow();
+    expect(events).toEqual(phase === 'before submission' ? [] : phase === 'replacement document'
+      ? ['down:Control', 'down:Shift'] : phase === 'primary key'
+      ? ['down:Control', 'down:Shift', 'down:A', 'up:A', 'up:Shift', 'up:Control']
+      : ['down:Control', 'down:Shift', 'up:Shift', 'up:Control']);
+  });
+
+  it('delivers a normal chord when the optional document lookup fails', async () => {
+    const getFrame = vi.fn().mockRejectedValue(new Error('Frame unavailable'));
+    vi.stubGlobal('chrome', { webNavigation: { getFrame } });
+    mocks.sendCommand.mockImplementation(async (_tab, _method, _event, _signal, submitted) => submitted?.());
+    const { signal } = new AbortController();
+    await dispatchKeySequence(7, 'Ctrl+A', 0, signal, signal);
+    expect(mocks.sendCommand.mock.calls.map(([, , event]) => event.type)).toEqual([
+      'rawKeyDown', 'rawKeyDown', 'keyUp', 'keyUp',
+    ]);
+  });
+
+  it('submits every release in order while a previous release waits for Chrome', async () => {
+    const controller = new AbortController();
+    vi.stubGlobal('chrome', { webNavigation: { getFrame: async () => ({ documentId: 'same' }) } });
+    const releases: string[] = [];
+    let acknowledge!: () => void;
+    const firstReply = new Promise<void>(resolve => { acknowledge = resolve; });
+    mocks.sendCommand.mockImplementation(async (_tab, _method, event, _signal, submitted) => {
+      submitted?.();
+      if (event.type === 'keyUp') {
+        releases.push(event.key);
+        if (event.key === 'A') await firstReply;
+      } else if (event.key === 'A') {
+        controller.abort();
+        throw controller.signal.reason;
+      }
+    });
+    const finished = dispatchKeySequence(7, 'Ctrl+Shift+A', 0, controller.signal, controller.signal)
+      .catch(error => error);
+    try {
+      await vi.waitFor(() => expect(releases).toEqual(['A', 'Shift', 'Control']));
+    } finally {
+      acknowledge();
+    }
+    expect(await finished).toBe(controller.signal.reason);
   });
 
   it('rejects expensive selectors before helper injection', async () => {

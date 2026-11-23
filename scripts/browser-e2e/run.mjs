@@ -75,6 +75,25 @@ const scenarios = {
     });
   },
 
+  async "cancel-key-chord"(t) {
+    const path = "/cancel-key-chord";
+    const tabId = await t.open(path);
+    const controller = new AbortController();
+    const pending = t.client.callTool(
+      { name: "chrome_keyboard", arguments: { tabId, keys: "Ctrl+Shift+A, B" } },
+      undefined, { signal: controller.signal },
+    ).then(() => false, () => true);
+    try {
+      assert.ok(await t.pageLog(path, "pressed"));
+    } finally {
+      controller.abort();
+    }
+    assert.ok(await pending);
+    assert.deepEqual((await t.pageLog(path, "released"))?.data, [
+      "down:ControlLeft", "down:ShiftLeft", "down:KeyA", "up:KeyA", "up:ShiftLeft", "up:ControlLeft",
+    ]);
+  },
+
   async "read-page-tree"(t) {
     const tabId = await t.open("/nested");
     const tree = await t.tree(tabId);

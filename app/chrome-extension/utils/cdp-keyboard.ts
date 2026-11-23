@@ -298,6 +298,10 @@ const MODIFIER_BIT_BY_KEY = new Map<string, number>(
   ]),
 );
 
+export function modifierBitForKey(key: string): number {
+  return MODIFIER_BIT_BY_KEY.get(key) ?? 0;
+}
+
 /** Press and release `stroke`, holding its modifiers around the key. */
 export async function dispatchKeyStroke(
   dispatch: DispatchKeyEvent,
@@ -342,7 +346,7 @@ export async function dispatchKeyStroke(
           : key.text
         : undefined;
     const commands = editingCommandsFor(stroke, mac);
-    const ownModifierBit = MODIFIER_BIT_BY_KEY.get(key.key) ?? 0;
+    const ownModifierBit = modifierBitForKey(key.key);
     await dispatch({
       type: text ? 'keyDown' : 'rawKeyDown',
       key: keyValue,

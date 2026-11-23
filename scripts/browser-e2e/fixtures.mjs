@@ -50,6 +50,26 @@ const PAGES = {
     LOGGER,
   ),
 
+  "/cancel-key-chord": page(
+    "Cancelled key chord",
+    `<input autofocus><script>
+  const events = [];
+  document.onkeydown = event => {
+    events.push("down:" + event.code);
+    if (event.code === "KeyA") {
+      __log("pressed", {});
+      const until = performance.now() + 3300;
+      while (performance.now() < until) {}
+    }
+  };
+  document.onkeyup = event => {
+    events.push("up:" + event.code);
+    if (event.key === "Control") __log("released", events);
+  };
+</script>`,
+    LOGGER,
+  ),
+
   "/nested": page(
     "Nested",
     `<div class="card"><div class="card-body"><div class="card-title"><div>Quarterly revenue report</div></div></div></div>
