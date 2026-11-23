@@ -16,7 +16,7 @@ export function observeCancelledMouseRelease() {
   if (scope.__webpageMcpCancelMouseAt) return;
 
   let pointerId: number | undefined;
-  let press: { event: MouseEvent; target: EventTarget; mouseTarget?: EventTarget; capture?: Element; pointerId?: number; timestamp: number } | undefined;
+  let press: { event: MouseEvent; target: EventTarget; capture?: Element; pointerId?: number; timestamp: number } | undefined;
   const rememberPointer = (event: PointerEvent) => {
     if (event.isTrusted && event.pointerType === 'mouse') pointerId = event.pointerId;
   };
@@ -33,10 +33,8 @@ export function observeCancelledMouseRelease() {
     const timestamp = performance.timeOrigin + event.timeStamp;
     const target = event.composedPath()[0];
     if (!target) return;
-    if (event.type === 'mousedown' && press?.timestamp === timestamp) {
-      press.mouseTarget = target;
-    } else {
-      press = { event, target, pointerId, timestamp, mouseTarget: event.type === 'mousedown' ? target : undefined };
+    if (event.type !== 'mousedown' || press?.timestamp !== timestamp) {
+      press = { event, target, pointerId, timestamp };
     }
   };
   // Either event may have been consumed by a listener registered before an upgrade.
@@ -52,7 +50,7 @@ export function observeCancelledMouseRelease() {
 
   const finish = () => {
     if (!press) return;
-    const { event, mouseTarget, pointerId: id } = press;
+    const { event, pointerId: id } = press;
     let target = press.target;
     if (id !== undefined && target instanceof Element) {
       // setPointerCapture takes effect before Chrome delivers gotpointercapture.
@@ -82,16 +80,6 @@ export function observeCancelledMouseRelease() {
     target.dispatchEvent(new PointerEvent('pointercancel', {
       ...position, pointerId: id, pointerType: 'mouse', isPrimary: true, bubbles: true, composed: true,
     }));
-    // A page that actually received the compatibility mousedown may track its
-    // drag entirely with mouse events. End it once at the original position.
-    if (mouseTarget) {
-      const release = new MouseEvent('mouseup', {
-        ...position, button: event.button, buttons: 0, bubbles: true, cancelable: true, composed: true,
-        ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
-      });
-      release.preventDefault();
-      mouseTarget.dispatchEvent(release);
-    }
   };
   scope.__webpageMcpCancelMouseAt = (timestamp, button) => {
     // DOMHighResTimeStamp has reduced precision relative to the supplied CDP timestamp.

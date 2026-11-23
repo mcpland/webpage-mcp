@@ -40,9 +40,9 @@ describe('cancelled native mouse input', () => {
       cancelObservedMousePress(performance.timeOrigin + 50, 0);
       expect(target.dispatchEvent).toHaveBeenCalledTimes(1);
       cancelObservedMousePress(performance.timeOrigin + 60, 0);
-      expect(target.dispatchEvent).toHaveBeenCalledTimes(3);
+      expect(target.dispatchEvent).toHaveBeenCalledTimes(2);
       expect(target.dispatchEvent).toHaveBeenLastCalledWith(expect.objectContaining({
-        type: 'mouseup', clientX: 42, clientY: 18, buttons: 0, defaultPrevented: true,
+        type: 'pointercancel', clientX: 42, clientY: 18,
       }));
     } finally { vi.unstubAllGlobals(); }
   });

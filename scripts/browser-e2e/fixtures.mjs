@@ -44,7 +44,7 @@ const PAGES = {
   };
   owner.onpointerup = event => { dragging = false; committed = event.clientX; };
   owner.onpointercancel = () => { dragging = false; __log("cancelled", {}); };
-  slider.onclick = () => { activations++; };
+  slider.onclick = slider.onmouseup = () => { activations++; };
   document.querySelector("#next").onclick = () => __log("next", { dragging, committed, activations });
 </script>`,
     LOGGER,

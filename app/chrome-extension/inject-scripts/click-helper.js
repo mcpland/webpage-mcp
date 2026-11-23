@@ -314,11 +314,10 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       try {
         await checkInput();
       } catch (error) {
-        // Balance only the press already delivered to this element. A synthetic
-        // mouseup does not synthesize a click. Suppress its default action as well.
-        const release = new MouseEvent('mouseup', { ...base, buttons: 0, cancelable: true });
-        release.preventDefault();
-        element.dispatchEvent(release);
+        // A mouseup can submit page actions even when its default has been cancelled.
+        element.dispatchEvent(new PointerEvent('pointercancel', {
+          ...base, pointerType: 'mouse', isPrimary: true, buttons: 0, composed: true,
+        }));
         throw error;
       }
       dispatch('mouseup');

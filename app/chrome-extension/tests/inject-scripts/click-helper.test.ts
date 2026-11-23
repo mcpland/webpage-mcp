@@ -74,6 +74,7 @@ describe('click-helper bounded text summaries', () => {
       configurable: true,
       value: nativeMouseEvent,
     });
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -98,12 +99,14 @@ describe('click-helper bounded text summaries', () => {
     document.body.append(button);
     mockElementFromPoint(button);
     mockMouseEvent();
+    vi.stubGlobal('PointerEvent', window.MouseEvent);
     const now = Date.now();
     let allowed = true;
     let pressed = false;
-    const releases: boolean[] = [];
+    const submitOnRelease = vi.fn();
     button.onmousedown = () => { allowed = false; pressed = true; };
-    button.onmouseup = event => { pressed = false; releases.push(event.defaultPrevented); };
+    button.onmouseup = submitOnRelease;
+    button.addEventListener('pointercancel', () => { pressed = false; });
     vi.spyOn(Date, 'now').mockImplementation(() => allowed ? now : now + 100);
     vi.mocked(chrome.runtime.sendMessage).mockImplementation(async () => allowed);
     const result = await dispatch(loadHelper(), {
@@ -112,7 +115,7 @@ describe('click-helper bounded text summaries', () => {
     });
     expect(result.error).toMatch(/timed out|cancelled/);
     expect(pressed).toBe(false);
-    expect(releases).toEqual([true]);
+    expect(submitOnRelease).not.toHaveBeenCalled();
     expect(clicked).not.toHaveBeenCalled();
   });
 
