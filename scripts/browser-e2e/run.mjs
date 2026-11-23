@@ -507,10 +507,12 @@ const scenarios = {
       ["chrome_fill_or_select", { selector: "#target", value: "test" }],
       ["chrome_computer", { action: "fill_form", elements: [{ selector: "#target", value: "test" }] }],
     ]) {
-      const tabId = await t.open("/submit-focus-dialog");
+      const tabId = await t.open(`/submit-focus-dialog?tool=${tool}`);
       const result = await t.call(tool, { ...args, tabId, submit: true });
       assert.equal(result.json?.dialog?.handled, false, result.text);
-      await t.call("chrome_handle_dialog", { tabId, action: "accept" });
+      const handled = await t.call("chrome_handle_dialog", { tabId, action: "accept" });
+      assert.ok(handled.ok, `${tool}: ${handled.text}`);
+      assert.equal(handled.json?.nextDialog, undefined, `${tool}: ${handled.text}`);
       assert.equal(result.json?.submitted, false, result.text);
       const actual = await t.call("chrome_javascript", {
         tabId,
