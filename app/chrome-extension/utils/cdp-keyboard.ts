@@ -49,7 +49,7 @@ const MODIFIER_ALIASES: Record<string, KeyModifier> = {
   shift: 'shift',
 };
 
-const MODIFIER_KEYS: Record<KeyModifier, KeyDefinition> = {
+export const MODIFIER_KEYS: Record<KeyModifier, KeyDefinition> = {
   alt: { key: 'Alt', code: 'AltLeft', keyCode: 18, location: 1 },
   ctrl: { key: 'Control', code: 'ControlLeft', keyCode: 17, location: 1 },
   meta: { key: 'Meta', code: 'MetaLeft', keyCode: 91, location: 1 },

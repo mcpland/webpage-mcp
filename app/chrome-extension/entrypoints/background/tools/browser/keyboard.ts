@@ -8,7 +8,8 @@ import { inputSignal, withInputPermit, type BrowserInputContext } from '@/utils/
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { runInNativeKeyQueue } from '../../tab-queue';
 import { readWithSignal } from '@/utils/read-with-signal';
-import { dispatchKeyStroke, modifierBitForKey, parseKeyboardInput, type KeyboardStep, type KeyStroke } from '@/utils/cdp-keyboard';
+import { trackChord, type PendingKeyRelease } from '@/utils/cancelled-keys';
+import { dispatchKeyStroke, MODIFIER_KEYS, modifierBitForKey, parseKeyboardInput, type KeyboardStep, type KeyStroke } from '@/utils/cdp-keyboard';
 import {
   CdpUnavailableError,
   PageUnresponsiveError,
@@ -44,7 +45,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function dispatchNativeStroke(
-  tabId: number, stroke: KeyStroke, signal?: AbortSignal, callerSignal?: AbortSignal, frameId = 0,
+  tabId: number, stroke: KeyStroke, signal?: AbortSignal, callerSignal?: AbortSignal,
 ) {
   const method = 'Input.dispatchKeyEvent';
   if (!callerSignal || (!stroke.modifiers.length && !modifierBitForKey(stroke.key.key))) {
@@ -53,43 +54,33 @@ async function dispatchNativeStroke(
       : cdpSessionManager.sendCommand(tabId, method, event), stroke, { signal });
   }
 
-  const documentId = async () => (await chrome.webNavigation?.getFrame?.({ tabId, frameId }))?.documentId;
-  const originalDocument = await readWithSignal(documentId, callerSignal).catch(() => {
-    callerSignal.throwIfAborted();
-    return undefined;
+  const token = crypto.randomUUID();
+  const codes = [stroke.key.code, ...stroke.modifiers.map(modifier => MODIFIER_KEYS[modifier].code)];
+  const track = (releases: PendingKeyRelease[] | null) => chrome.scripting.executeScript({
+    target: { tabId, allFrames: true }, world: 'ISOLATED', injectImmediately: true,
+    func: trackChord, args: [token, codes, releases],
   });
-  const releases = new Map<string, Record<string, unknown>>();
-  const dispatch = (event: Record<string, unknown>) => {
-    const key = String(event.key);
-    const bit = modifierBitForKey(key);
-    return cdpSessionManager.sendCommand(tabId, method, event, callerSignal, () => {
-      // The key can reach Chrome even when cancellation discards its acknowledgement.
-      if (event.type === 'keyUp') releases.delete(key);
-      else releases.set(key, {
-        type: 'keyUp', key, code: event.code, windowsVirtualKeyCode: event.windowsVirtualKeyCode,
-        location: event.location, modifiers: Number(event.modifiers) & ~bit,
-      });
-    });
-  };
+  const releases = new Map<string, PendingKeyRelease>();
   try {
-    await dispatchKeyStroke(dispatch, stroke, { signal });
+    // A stalled sibling must not prevent a chord from reaching the focused document.
+    await readWithSignal(() => track(null), AbortSignal.any([callerSignal, AbortSignal.timeout(250)]))
+      .catch(() => callerSignal.throwIfAborted());
+    await dispatchKeyStroke(event => {
+      const timestamp = Date.now();
+      const code = String(event.code);
+      return cdpSessionManager.sendCommand(tabId, method, { ...event, timestamp: timestamp / 1000 }, callerSignal, () => {
+        if (event.type === 'keyUp') releases.delete(code);
+        else releases.set(code, {
+          code, timestamp, modifiers: Number(event.modifiers) & ~modifierBitForKey(String(event.key)),
+        });
+      });
+    }, stroke, { signal });
   } finally {
-    if (releases.size) {
-      const cleanup = AbortSignal.timeout(1500);
-      const sameDocument = !chrome.webNavigation?.getFrame || (originalDocument && originalDocument ===
-        await readWithSignal(documentId, cleanup).catch(() => undefined));
-      if (sameDocument) {
-        const replies: Promise<void>[] = [];
-        for (const release of [...releases.values()].reverse()) {
-          // A slow page can delay acknowledgements for longer than the cleanup budget.
-          await new Promise<void>(submittedOrFailed => {
-            const reply = cdpSessionManager.sendCommand(tabId, method, release, cleanup, submittedOrFailed);
-            replies.push(reply.then(submittedOrFailed, submittedOrFailed));
-          });
-        }
-        await Promise.all(replies);
-      }
-    }
+    // Native keyUp is routed to current focus, which may have moved during keydown.
+    // Each original document balances only the downs it actually received.
+    const close = async () => track([...releases.values()].reverse());
+    if (releases.size) await readWithSignal(close, AbortSignal.timeout(1500)).catch(() => {});
+    else void close().catch(() => {});
   }
 }
 
@@ -103,7 +94,6 @@ export async function dispatchKeySequence(
   delay: number,
   signal?: AbortSignal,
   callerSignal?: AbortSignal,
-  frameId?: number,
 ): Promise<void> {
   const steps = parseKeyboardInput(keys);
   for (let index = 0; index < steps.length; index += 1) {
@@ -116,7 +106,7 @@ export async function dispatchKeySequence(
         if (callerSignal) await cdpSessionManager.sendCommand(tabId, 'Input.insertText', params, callerSignal);
         else await cdpSessionManager.sendCommand(tabId, 'Input.insertText', params);
       } else {
-        await dispatchNativeStroke(tabId, step.stroke, signal, callerSignal, frameId);
+        await dispatchNativeStroke(tabId, step.stroke, signal, callerSignal);
       }
     }, signal);
     if (signal?.aborted) return;
@@ -341,7 +331,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         input = await runCdpInputWithDialogs(
           targetTabId,
           'keyboard',
-          (signal) => dispatchKeySequence(targetTabId, keys, delay, callerSignal ? AbortSignal.any([callerSignal, signal]) : signal, callerSignal, targetFrameId),
+          (signal) => dispatchKeySequence(targetTabId, keys, delay, callerSignal ? AbortSignal.any([callerSignal, signal]) : signal, callerSignal),
           { dialog: dialogResponse },
         );
         callerSignal?.throwIfAborted();

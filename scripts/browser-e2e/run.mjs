@@ -89,9 +89,10 @@ const scenarios = {
       controller.abort();
     }
     assert.ok(await pending);
-    assert.deepEqual((await t.pageLog(path, "released"))?.data, [
-      "down:ControlLeft", "down:ShiftLeft", "down:KeyA", "up:KeyA", "up:ShiftLeft", "up:ControlLeft",
-    ]);
+    assert.deepEqual((await t.pageLog(path, "released"))?.data, {
+      events: ["down:ControlLeft", "down:ShiftLeft", "down:KeyA", "up:KeyA", "up:ShiftLeft", "up:ControlLeft"],
+      childKeys: [],
+    });
   },
 
   async "read-page-tree"(t) {

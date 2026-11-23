@@ -52,11 +52,14 @@ const PAGES = {
 
   "/cancel-key-chord": page(
     "Cancelled key chord",
-    `<input autofocus><script>
+    `<input autofocus><iframe id="other" srcdoc="<input>"></iframe><script>
   const events = [];
+  const childKeys = [];
+  other.onload = () => other.contentDocument.onkeyup = event => childKeys.push(event.code);
   document.onkeydown = event => {
     events.push("down:" + event.code);
     if (event.code === "KeyA") {
+      other.contentDocument.querySelector("input").focus();
       __log("pressed", {});
       const until = performance.now() + 3300;
       while (performance.now() < until) {}
@@ -64,7 +67,7 @@ const PAGES = {
   };
   document.onkeyup = event => {
     events.push("up:" + event.code);
-    if (event.key === "Control") __log("released", events);
+    if (event.key === "Control") __log("released", { events, childKeys });
   };
 </script>`,
     LOGGER,
