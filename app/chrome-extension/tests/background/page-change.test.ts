@@ -160,6 +160,30 @@ describe('page change summary', () => {
     }
   });
 
+  it('rechecks a complete tab after a slow service-worker redirect becomes a download', async () => {
+    vi.useFakeTimers();
+    const original = chrome.webNavigation;
+    const event = () => ({ addListener: vi.fn(), removeListener: vi.fn() });
+    const events = { onBeforeNavigate: event(), onCommitted: event(), onErrorOccurred: event() };
+    Object.assign(chrome, { webNavigation: events });
+    try {
+      const initial = { id: 7, url: 'https://example.com/page', status: 'complete' as const };
+      tabs.set(7, initial);
+      const observer = (await observePageChanges(7, 0))!;
+      const frame = { tabId: 7, frameId: 0 };
+      events.onBeforeNavigate.addListener.mock.calls[0][0]({ ...frame, url: 'https://example.com/go' });
+      tabs.set(7, { ...initial, status: 'loading', pendingUrl: 'https://example.com/go' });
+      const pending = observer.finish(okResult());
+      await vi.advanceTimersByTimeAsync(1100);
+      tabs.set(7, initial);
+      events.onErrorOccurred.addListener.mock.calls[0][0]({ ...frame, url: 'https://example.com/file', error: 'net::ERR_ABORTED' });
+      await vi.advanceTimersByTimeAsync(150);
+      expect(await pending).toBeUndefined();
+    } finally {
+      Object.assign(chrome, { webNavigation: original });
+    }
+  });
+
   it('returns nothing when the page did not change', async () => {
     const observer = (await observePageChanges(7, 0))!;
     expect(await observer.finish(okResult())).toBeUndefined();
