@@ -1,3 +1,4 @@
+import { addAgentStreamListener, removeAgentStreamListener, type AgentStreamListener } from "../agent-stream-events";
 import {
   BACKGROUND_MESSAGE_TYPES,
   PRIVILEGED_UI_ACTIONS,
@@ -6,10 +7,8 @@ import {
 import {
   isExtensionBackgroundSender,
   isExtensionPageSender,
-  isExtensionRuntimeSender,
   isExtensionTopFrameSender,
 } from "@/common/runtime-sender-auth";
-import { sanitizeAgentStreamRelayPayload } from "@/common/agent-stream-boundaries";
 import {
   WEB_EDITOR_ACTIONS,
   type ElementChangeSummary,
@@ -398,10 +397,7 @@ type SessionStatusWatchdog = ReturnType<typeof globalThis.setTimeout>;
 interface SessionStatusConnection {
   readonly subscriptionId: string;
   readonly lastRequestId: string;
-  readonly listener: (
-    message: unknown,
-    sender: chrome.runtime.MessageSender,
-  ) => void;
+  readonly listener: AgentStreamListener;
   readonly watchdog: SessionStatusWatchdog;
 }
 
@@ -409,10 +405,7 @@ interface SessionStatusSubscriptionIntent {
   readonly requestId: string;
   readonly subscriptionId: string;
   readonly token: symbol;
-  readonly listener: (
-    message: unknown,
-    sender: chrome.runtime.MessageSender,
-  ) => void;
+  readonly listener: AgentStreamListener;
   readonly watchdog: SessionStatusWatchdog;
 }
 
@@ -470,7 +463,7 @@ export async function closeSessionStatusSubscription(
   if (!boundedRequestId || intent?.requestId === boundedRequestId) {
     if (intent) {
       clearSessionStatusWatchdog(intent.watchdog);
-      chrome.runtime.onMessage.removeListener(intent.listener);
+      removeAgentStreamListener(intent.listener);
       subscriptionIds.add(intent.subscriptionId);
     }
     sseSubscriptionIntents.delete(boundedSessionId);
@@ -485,7 +478,7 @@ export async function closeSessionStatusSubscription(
     // by this older close operation after it finishes.
     sseConnections.delete(boundedSessionId);
     clearSessionStatusWatchdog(existing.watchdog);
-    chrome.runtime.onMessage.removeListener(existing.listener);
+    removeAgentStreamListener(existing.listener);
     subscriptionIds.add(existing.subscriptionId);
   }
 
@@ -524,14 +517,14 @@ export async function subscribeToSessionStatus(
   if (previousIntent) {
     sseSubscriptionIntents.delete(boundedSessionId);
     clearSessionStatusWatchdog(previousIntent.watchdog);
-    chrome.runtime.onMessage.removeListener(previousIntent.listener);
+    removeAgentStreamListener(previousIntent.listener);
   }
 
   const existing = sseConnections.get(boundedSessionId);
   if (existing) {
     sseConnections.delete(boundedSessionId);
     clearSessionStatusWatchdog(existing.watchdog);
-    chrome.runtime.onMessage.removeListener(existing.listener);
+    removeAgentStreamListener(existing.listener);
   }
 
   const requestedSubscriptionId = normalizeSessionStatusIdentifier(
@@ -539,31 +532,21 @@ export async function subscribeToSessionStatus(
     "subscriptionId",
     "subscription",
   );
-  const onMessage = (
-    message: unknown,
-    sender: chrome.runtime.MessageSender,
-  ): void => {
-    if (!isExtensionRuntimeSender(sender)) return;
-    const msg = message as {
-      type?: string;
-      payload?: { subscriptionId?: string; event?: unknown };
-    };
-    if (msg?.type !== BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT) return;
-    const relay = sanitizeAgentStreamRelayPayload(msg.payload);
-    if (relay?.subscriptionId !== requestedSubscriptionId) return;
+  const onStreamEvent: AgentStreamListener = (relay) => {
+    if (relay.subscriptionId !== requestedSubscriptionId) return;
     handleSseEvent(boundedSessionId, boundedRequestId, relay.event);
   };
   const intent: SessionStatusSubscriptionIntent = {
     requestId: boundedRequestId,
     subscriptionId: requestedSubscriptionId,
     token: Symbol(boundedRequestId),
-    listener: onMessage,
+    listener: onStreamEvent,
     watchdog: createSessionStatusWatchdog(boundedSessionId, boundedRequestId),
   };
   sseSubscriptionIntents.set(boundedSessionId, intent);
   // The ID is deterministic, so the relay listener can be installed before
   // native subscription establishment and cannot miss an immediate event.
-  chrome.runtime.onMessage.addListener(onMessage);
+  addAgentStreamListener(onStreamEvent);
 
   await Promise.all(
     [previousIntent?.subscriptionId, existing?.subscriptionId]
@@ -602,7 +585,7 @@ export async function subscribeToSessionStatus(
     sseConnections.set(boundedSessionId, {
       subscriptionId: boundedSubscriptionId,
       lastRequestId: boundedRequestId,
-      listener: onMessage,
+      listener: onStreamEvent,
       watchdog: intent.watchdog,
     });
     setExecutionStatus(boundedRequestId, "running", "Agent processing...");
@@ -614,14 +597,14 @@ export async function subscribeToSessionStatus(
       ownedFailure = true;
       sseSubscriptionIntents.delete(boundedSessionId);
       clearSessionStatusWatchdog(pending.watchdog);
-      chrome.runtime.onMessage.removeListener(pending.listener);
+      removeAgentStreamListener(pending.listener);
     }
     const active = sseConnections.get(boundedSessionId);
     if (subscriptionId && active?.subscriptionId === subscriptionId) {
       ownedFailure = true;
       sseConnections.delete(boundedSessionId);
       clearSessionStatusWatchdog(active.watchdog);
-      chrome.runtime.onMessage.removeListener(active.listener);
+      removeAgentStreamListener(active.listener);
     }
     await Promise.all(
       [

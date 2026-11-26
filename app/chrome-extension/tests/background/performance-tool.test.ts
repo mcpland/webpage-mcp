@@ -15,10 +15,10 @@ const mocks = vi.hoisted(() => ({
   alarmsOnAlarmAddListener: vi.fn(),
   downloadsDownload: vi.fn(),
   downloadsSearch: vi.fn(),
-  runtimeOnMessageAddListener: vi.fn(),
-  runtimeOnMessageRemoveListener: vi.fn(),
-  runtimeSendMessage: vi.fn(),
+  requestNativeFile: vi.fn(),
 }));
+
+vi.mock('@/entrypoints/background/native-requests', () => ({ requestNativeFile: mocks.requestNativeFile }));
 
 vi.mock('@/utils/cdp-session-manager', () => ({
   cdpSessionManager: {
@@ -61,40 +61,9 @@ describe('performance trace tools', () => {
         filename: '/Users/alice/Downloads/perf-secret.json',
       },
     ]);
-    const nativeListeners = new Set<(message: any) => void>();
-    mocks.runtimeOnMessageAddListener.mockImplementation((listener) => {
-      nativeListeners.add(listener);
-    });
-    mocks.runtimeOnMessageRemoveListener.mockImplementation((listener) => {
-      nativeListeners.delete(listener);
-    });
-    mocks.runtimeSendMessage.mockImplementation(async (message) => {
-      const requestId = message?.message?.requestId;
-      const action = message?.message?.payload?.action;
-      if (action === 'prepareFile') {
-        nativeListeners.forEach((listener) =>
-          listener({
-            type: 'file_operation_response',
-            responseToRequestId: requestId,
-            payload: {
-              success: true,
-              filePath: `/private/native/${requestId}.json`,
-            },
-          }),
-        );
-      } else if (action === 'analyzeTrace' || action === 'cleanupFile') {
-        nativeListeners.forEach((listener) =>
-          listener({
-            type: 'file_operation_response',
-            responseToRequestId: requestId,
-            payload:
-              action === 'cleanupFile'
-                ? { success: true }
-                : { success: false, error: 'analysis unavailable in default mock' },
-          }),
-        );
-      }
-      return { success: true };
+    mocks.requestNativeFile.mockImplementation(async ({ action }) => {
+      if (action === 'prepareFile') return { success: true, filePath: '/private/native/trace.json' };
+      return { success: action === 'cleanupFile' };
     });
     mocks.alarmsCreate.mockResolvedValue(undefined);
     mocks.alarmsClear.mockResolvedValue(true);
@@ -126,13 +95,6 @@ describe('performance trace tools', () => {
         onAlarm: {
           addListener: mocks.alarmsOnAlarmAddListener,
         },
-      },
-      runtime: {
-        onMessage: {
-          addListener: mocks.runtimeOnMessageAddListener,
-          removeListener: mocks.runtimeOnMessageRemoveListener,
-        },
-        sendMessage: mocks.runtimeSendMessage,
       },
     });
   });
@@ -252,6 +214,22 @@ describe('performance trace tools', () => {
     expect(mocks.sendCommand).not.toHaveBeenCalled();
   });
 
+  it('keeps the final browser event batch in the native trace until tracingComplete', async () => {
+    const { performanceStartTraceTool, performanceStopTraceTool } = await loadPerformanceTools();
+    await performanceStartTraceTool.execute({});
+    const stop = performanceStopTraceTool.execute({ saveToDownloads: false });
+    await vi.waitFor(() => expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'Tracing.end'));
+    const listener = mocks.debuggerOnEventAddListener.mock.calls[0][0];
+    const event = { name: 'last-batch' };
+    listener({ tabId: 7 }, 'Tracing.dataCollected', { value: [event] });
+    listener({ tabId: 7 }, 'Tracing.tracingComplete', {});
+    listener({ tabId: 7 }, 'Tracing.dataCollected', { value: [{ name: 'too-late' }] });
+    const result = await stop;
+    expect(result.isError).toBe(false);
+    const prepare = mocks.requestNativeFile.mock.calls.find(([arg]) => arg.action === 'prepareFile');
+    expect(JSON.parse(atob(prepare?.[0].base64Data))).toEqual({ traceEvents: [event] });
+  });
+
   it('redacts saved download paths in stop responses', async () => {
     const { performanceStartTraceTool, performanceStopTraceTool } = await loadPerformanceTools();
 
@@ -285,7 +263,7 @@ describe('performance trace tools', () => {
   it('falls back immediately when native forwarding rejects the analysis copy', async () => {
     const { performanceStartTraceTool, performanceStopTraceTool, performanceAnalyzeInsightTool } =
       await loadPerformanceTools();
-    mocks.runtimeSendMessage.mockResolvedValue({
+    mocks.requestNativeFile.mockResolvedValue({
       success: false,
       error: 'Native host not connected',
     });
@@ -302,7 +280,7 @@ describe('performance trace tools', () => {
     expect(String((analyze.content[0] as { text?: string })?.text || '')).toContain(
       'Lightweight analysis',
     );
-    expect(mocks.runtimeOnMessageRemoveListener).toHaveBeenCalledTimes(1);
+    expect(mocks.requestNativeFile).toHaveBeenCalledTimes(1);
   });
 
   it('redacts saved trace paths in analyze responses while keeping native analysis enabled', async () => {
@@ -316,46 +294,9 @@ describe('performance trace tools', () => {
       return undefined;
     });
 
-    const listeners: Array<(message: any) => void> = [];
-    mocks.runtimeOnMessageAddListener.mockImplementation((listener) => {
-      listeners.push(listener);
-    });
-    mocks.runtimeOnMessageRemoveListener.mockImplementation((listener) => {
-      const index = listeners.indexOf(listener);
-      if (index >= 0) listeners.splice(index, 1);
-    });
-    mocks.runtimeSendMessage.mockImplementation(async (message) => {
-      const requestId = message?.message?.requestId;
-      const action = message?.message?.payload?.action;
-      if (action === 'prepareFile') {
-        const listener = listeners.at(-1);
-        listener?.({
-          type: 'file_operation_response',
-          responseToRequestId: requestId,
-          payload: {
-            success: true,
-            filePath: '/private/native/performance-analysis.json',
-          },
-        });
-      } else if (action === 'analyzeTrace') {
-        const listener = listeners.at(-1);
-        listener?.({
-          type: 'file_operation_response',
-          responseToRequestId: requestId,
-          payload: {
-            success: true,
-            summary: { insightName: 'test-summary' },
-            insight: { score: 1 },
-          },
-        });
-      } else if (action === 'cleanupFile') {
-        const listener = listeners.at(-1);
-        listener?.({
-          type: 'file_operation_response',
-          responseToRequestId: requestId,
-          payload: { success: true },
-        });
-      }
+    mocks.requestNativeFile.mockImplementation(async ({ action }) => {
+      if (action === 'prepareFile') return { success: true, filePath: '/private/native/performance-analysis.json' };
+      if (action === 'analyzeTrace') return { success: true, summary: { insightName: 'test-summary' }, insight: { score: 1 } };
       return { success: true };
     });
 
@@ -376,8 +317,8 @@ describe('performance trace tools', () => {
     });
     expect('fullPath' in payload.saved).toBe(false);
     expect(payload.summary).toEqual({ insightName: 'test-summary' });
-    const nativePayloads = mocks.runtimeSendMessage.mock.calls.map(
-      ([message]) => message?.message?.payload,
+    const nativePayloads = mocks.requestNativeFile.mock.calls.map(
+      ([payload]) => payload,
     );
     expect(nativePayloads).toEqual(
       expect.arrayContaining([

@@ -235,16 +235,9 @@ describe("Web Editor Agent durable lifecycle", () => {
     >;
     const [ownerKey] = Object.keys(ledger);
     const requestId = ledger[ownerKey]!.requestId as string;
-    const streamListener = runtimeListeners[1]!;
+    const { relayNativeAgentStreamEvent } = await import("@/entrypoints/background/agent-stream-events");
     const relay = (event: unknown): void => {
-      streamListener(
-        {
-          type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
-          payload: { subscriptionId: requestedSubscriptionId, event },
-        },
-        { id: chrome.runtime.id },
-        vi.fn(),
-      );
+      relayNativeAgentStreamEvent({ subscriptionId: requestedSubscriptionId, event });
     };
 
     relay({ type: "status", data: { status: "completed" } });

@@ -107,6 +107,8 @@ const PAGES = {
     LOGGER,
   ),
 
+  "/upload": page("Upload", '<input type="file" id="upload">'),
+
   "/form": page(
     "Form",
     `<h1>Login</h1>

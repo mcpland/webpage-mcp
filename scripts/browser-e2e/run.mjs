@@ -495,6 +495,40 @@ const scenarios = {
     assert.match((await t.call("chrome_read_page", {})).text, /Login/);
   },
 
+  async "native-trace-events"(t) {
+    const tabId = await t.open("/simple");
+    const start = await t.call("performance_start_trace", { tabId });
+    assert.ok(start.ok, start.text);
+    const mark = await t.call("chrome_javascript", {
+      tabId, code: 'performance.mark("local-trace-event"); return document.title',
+    });
+    assert.ok(mark.ok, mark.text);
+    const stop = await t.call("performance_stop_trace", { tabId, saveToDownloads: false });
+    assert.ok(stop.ok && stop.json?.tracingCompleted && stop.json.eventCount > 0, stop.text);
+    assert.ok(stop.json.saved?.filename, stop.text);
+    const analysis = await t.call("performance_analyze_insight", { tabId });
+    assert.ok(analysis.ok, analysis.text);
+    assert.equal(analysis.json?.eventCount, stop.json.eventCount, analysis.text);
+  },
+
+  async "upload-file-contents"(t) {
+    const tabId = await t.open("/upload");
+    const urlText = await (await fetch(t.base + "/file.txt")).text();
+    for (const [source, content] of [
+      [{ base64Data: Buffer.from("hello from MCP").toString("base64") }, "hello from MCP"],
+      [{ fileUrl: t.base + "/file.txt" }, urlText],
+    ]) {
+      const uploaded = await t.call("chrome_upload_file", {
+        tabId, selector: "#upload", fileName: "example.txt", ...source,
+      });
+      assert.ok(uploaded.ok, uploaded.text);
+      const read = await t.call("chrome_javascript", {
+        tabId, code: 'return await document.querySelector("#upload").files[0].text()',
+      });
+      assert.equal(read.json?.result, content, read.text);
+    }
+  },
+
   async "fill-submit-and-type-clear"(t) {
     const tabId = await t.open("/form");
     t.fixtures.clearLogs();

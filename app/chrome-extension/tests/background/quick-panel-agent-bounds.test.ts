@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 
 const nativeHostMocks = vi.hoisted(() => ({
+  ensureNativeConnected: vi.fn(async () => true),
   requestAgentRpcFetch: vi.fn(),
   subscribeAgentStream: vi.fn(),
   unsubscribeAgentStream: vi.fn(),

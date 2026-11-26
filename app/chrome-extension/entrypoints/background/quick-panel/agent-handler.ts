@@ -1,3 +1,4 @@
+import { addAgentStreamListener, removeAgentStreamListener, type AgentStreamListener } from "../agent-stream-events";
 /**
  * Quick Panel Agent Handler
  *
@@ -14,7 +15,6 @@
  */
 
 import type { AgentActRequest, RealtimeEvent } from "webpage-mcp-shared";
-import { NativeMessageType } from "webpage-mcp-shared";
 
 import {
   BACKGROUND_MESSAGE_TYPES,
@@ -29,13 +29,12 @@ import {
 import { consumePrivilegedUiAuthorization } from "../privileged-ui-authorization";
 import { acquireKeepalive } from "../keepalive-manager";
 import { openAgentSetupSidepanel } from "../utils/sidepanel";
-import { isExtensionRuntimeSender } from "@/common/runtime-sender-auth";
 import {
   AGENT_STREAM_LIMITS,
   agentStreamUtf8Bytes,
-  sanitizeAgentStreamRelayPayload,
 } from "@/common/agent-stream-boundaries";
 import {
+  ensureNativeConnected,
   requestAgentRpcFetch,
   subscribeAgentStream,
   unsubscribeAgentStream,
@@ -126,10 +125,7 @@ interface ActiveRequest {
   actDispatchStarted: boolean;
   terminalObserved: boolean;
   streamSubscriptionId?: string;
-  streamListener?: (
-    message: unknown,
-    sender: chrome.runtime.MessageSender,
-  ) => void;
+  streamListener?: AgentStreamListener;
   forwardedEventCount: number;
   forwardedEventBytes: number;
 }
@@ -538,7 +534,7 @@ function releaseLocalRequest(requestId: string): ActiveRequest | undefined {
 
     if (request.streamListener) {
       try {
-        chrome.runtime.onMessage.removeListener(request.streamListener);
+        removeAgentStreamListener(request.streamListener);
       } catch {
         // Ignore
       }
@@ -776,21 +772,8 @@ function createSseSubscription(request: ActiveRequest): SseSubscription {
   const subscriptionId = `quick-panel-${request.requestId}`;
   request.streamSubscriptionId = subscriptionId;
 
-  const onMessage = (
-    message: unknown,
-    sender: chrome.runtime.MessageSender,
-  ): void => {
-    if (!isExtensionRuntimeSender(sender)) return;
-    const msg = message as {
-      type?: string;
-      payload?: {
-        subscriptionId?: string;
-        event?: RealtimeEvent;
-      };
-    };
-    if (msg?.type !== BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT) return;
-    const relay = sanitizeAgentStreamRelayPayload(msg.payload);
-    if (relay?.subscriptionId !== subscriptionId) return;
+  const onStreamEvent: AgentStreamListener = (relay) => {
+    if (relay.subscriptionId !== subscriptionId) return;
 
     const event = relay.event;
     if (!shouldForwardEvent(event, request.requestId)) return;
@@ -830,8 +813,8 @@ function createSseSubscription(request: ActiveRequest): SseSubscription {
 
   // Install the deterministic subscription listener before asking native to
   // subscribe so an immediate terminal event cannot fall into a handshake gap.
-  request.streamListener = onMessage;
-  chrome.runtime.onMessage.addListener(onMessage);
+  request.streamListener = onStreamEvent;
+  addAgentStreamListener(onStreamEvent);
   request.abortController.signal.addEventListener(
     "abort",
     () => {
@@ -1162,9 +1145,7 @@ function reservationScopeKey(
 async function startRequest(request: ActiveRequest): Promise<void> {
   try {
     // Best-effort: ensure MCP server is running
-    await toPromise(
-      chrome.runtime.sendMessage({ type: NativeMessageType.ENSURE_NATIVE }),
-    ).catch(() => null);
+    await ensureNativeConnected("quick_panel_start").catch(() => false);
 
     // Guard: check if cancelled during ENSURE_NATIVE
     if (!isRequestStillActive(request)) return;

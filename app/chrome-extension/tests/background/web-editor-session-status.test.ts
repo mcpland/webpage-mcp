@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+
 
 const nativeHostMocks = vi.hoisted(() => ({
   requestAgentRpcFetch: vi.fn(),
@@ -22,9 +22,13 @@ function deferred<T>(): {
 }
 
 describe("Web Editor session status subscriptions", () => {
-  beforeEach(() => {
+  let streamEvents: typeof import("@/entrypoints/background/agent-stream-events");
+  beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    streamEvents = await import("@/entrypoints/background/agent-stream-events");
+    vi.spyOn(streamEvents, "addAgentStreamListener");
+    vi.spyOn(streamEvents, "removeAgentStreamListener");
     nativeHostMocks.unsubscribeAgentStream.mockResolvedValue(undefined);
   });
 
@@ -56,8 +60,8 @@ describe("Web Editor session status subscriptions", () => {
     expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith(
       firstSubscriptionId,
     );
-    expect(chrome.runtime.onMessage.addListener).toHaveBeenCalledTimes(2);
-    expect(chrome.runtime.onMessage.removeListener).toHaveBeenCalledOnce();
+    expect(streamEvents.addAgentStreamListener).toHaveBeenCalledTimes(2);
+    expect(streamEvents.removeAgentStreamListener).toHaveBeenCalledOnce();
 
     await vi.waitFor(() =>
       expect(nativeHostMocks.subscribeAgentStream).toHaveBeenCalledTimes(2),
@@ -67,44 +71,15 @@ describe("Web Editor session status subscriptions", () => {
     second.resolve({ subscriptionId: secondSubscriptionId });
     await expect(secondSetup).resolves.toBe(true);
 
-    const listener = vi.mocked(chrome.runtime.onMessage.addListener).mock
-      .calls[1]?.[0];
-    expect(listener).toBeTypeOf("function");
-    listener!(
-      {
-        type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
-        payload: {
-          subscriptionId: secondSubscriptionId,
-          event: {
-            type: "error",
-            error: "forged stream failure",
-            data: { requestId: "request-2" },
-          },
-        },
-      },
-      {
-        id: chrome.runtime.id,
-        tab: { id: 7 } as chrome.tabs.Tab,
-        frameId: 0,
-      },
-      vi.fn(),
-    );
+    expect(chrome.runtime.onMessage.addListener).not.toHaveBeenCalled();
     expect(nativeHostMocks.unsubscribeAgentStream).not.toHaveBeenCalledWith(
       secondSubscriptionId,
     );
 
-    listener!(
-      {
-        type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
-        payload: {
-          subscriptionId: secondSubscriptionId,
-          event: { type: "error", error: "stream failed" },
-        },
-      },
-      { id: chrome.runtime.id } as chrome.runtime.MessageSender,
-      vi.fn(),
-    );
-
+    streamEvents.relayNativeAgentStreamEvent({
+      subscriptionId: secondSubscriptionId,
+      event: { type: "error", error: "stream failed" },
+    });
     expect(nativeHostMocks.unsubscribeAgentStream).not.toHaveBeenCalledWith(
       secondSubscriptionId,
     );
@@ -131,8 +106,8 @@ describe("Web Editor session status subscriptions", () => {
     expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith(
       subscriptionId,
     );
-    expect(chrome.runtime.onMessage.addListener).toHaveBeenCalledOnce();
-    expect(chrome.runtime.onMessage.removeListener).toHaveBeenCalledOnce();
+    expect(streamEvents.addAgentStreamListener).toHaveBeenCalledOnce();
+    expect(streamEvents.removeAgentStreamListener).toHaveBeenCalledOnce();
   });
 
   it("caps pending and active status subscriptions together", async () => {
@@ -197,7 +172,7 @@ describe("Web Editor session status subscriptions", () => {
 
     await vi.advanceTimersByTimeAsync(WEB_EDITOR_SESSION_STATUS_WATCHDOG_MS);
 
-    expect(chrome.runtime.onMessage.removeListener).toHaveBeenCalledOnce();
+    expect(streamEvents.removeAgentStreamListener).toHaveBeenCalledOnce();
     expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith(
       subscriptionId,
     );
@@ -223,8 +198,8 @@ describe("Web Editor session status subscriptions", () => {
       subscribeToSessionStatus("session-1", "request-1"),
     ).rejects.toThrow(/subscriptionId exceeds the Web Editor field byte limit/);
 
-    expect(chrome.runtime.onMessage.addListener).toHaveBeenCalledOnce();
-    expect(chrome.runtime.onMessage.removeListener).toHaveBeenCalledOnce();
+    expect(streamEvents.addAgentStreamListener).toHaveBeenCalledOnce();
+    expect(streamEvents.removeAgentStreamListener).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   });
 });

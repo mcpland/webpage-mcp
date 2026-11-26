@@ -3,7 +3,6 @@ import { toDownloadDisplayName } from '@/entrypoints/background/download-paths';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
-import { hasDisallowedPublicUrlScheme } from './common';
 
 interface FileUploadToolParams {
   selector: string; // CSS selector for the file input element
@@ -14,6 +13,12 @@ interface FileUploadToolParams {
   multiple?: boolean; // Whether to allow multiple files
   tabId?: number; // Target existing tab id
   windowId?: number; // When no tabId, pick active tab from this window
+}
+
+interface RemoteUpload {
+  fileUrl?: string;
+  base64Data?: string;
+  fileName: string;
 }
 
 interface InternalLocalFileUploadParams {
@@ -64,7 +69,7 @@ function estimateBase64DecodedBytes(value: string): number {
 }
 
 function isPublicUploadPage(url?: string | null): boolean {
-  return typeof url === 'string' && url.trim().length > 0 && !hasDisallowedPublicUrlScheme(url);
+  return typeof url === 'string' && /^https?:\/\//i.test(url);
 }
 
 function normalizeFileInputSelector(value: unknown): string {
@@ -126,7 +131,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
       );
     }
 
-    if (normalizedFileUrl && hasDisallowedPublicUrlScheme(normalizedFileUrl)) {
+    if (normalizedFileUrl && !isPublicUploadPage(normalizedFileUrl)) {
       return createErrorResponse('Only http:// and https:// URLs are allowed for fileUrl uploads.');
     }
 
@@ -144,37 +149,14 @@ class FileUploadTool extends BaseBrowserToolExecutor {
       );
     }
 
+    if (fileName !== undefined && (typeof fileName !== 'string' || fileName.length > 255 || new TextEncoder().encode(fileName).length > 255)) {
+      return createErrorResponse('fileName must be a string of at most 255 UTF-8 bytes');
+    }
     try {
-      const explicit = await this.getRequestedTab(args.tabId);
-      const uploadTarget = explicit || (await this.getActiveTabInWindow(args.windowId));
-      if (!uploadTarget?.id) {
-        return createErrorResponse('No active tab found');
-      }
-      if (!isPublicUploadPage(uploadTarget.url)) {
-        return createErrorResponse(FILE_UPLOAD_PUBLIC_PAGE_ERROR);
-      }
-
-      const tempFilePath = await this.prepareFileFromRemote({
-        fileUrl: normalizedFileUrl,
-        base64Data,
-        fileName: fileName || 'uploaded-file',
+      return await this.setInputFile({ ...args, selector }, {
+        fileUrl: normalizedFileUrl, base64Data,
+        fileName: fileName?.split(/[/\\]/).pop() || 'uploaded-file',
       });
-      if (!tempFilePath) {
-        return createErrorResponse('Failed to prepare file for upload');
-      }
-
-      try {
-        return await this.uploadPreparedFiles(
-          {
-            selector,
-            multiple,
-            tabId: uploadTarget.id,
-          },
-          [tempFilePath],
-        );
-      } finally {
-        await this.cleanupPreparedRemoteFile(tempFilePath);
-      }
     } catch (error) {
       console.error(
         'Error in file upload operation:',
@@ -201,14 +183,14 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     }
 
     try {
-      return await this.uploadPreparedFiles(
+      return await this.setInputFile(
         {
           selector,
           multiple: args.multiple,
           tabId: args.tabId,
           windowId: args.windowId,
         },
-        [filePath],
+        filePath,
         args.signal,
       );
     } catch (error) {
@@ -221,9 +203,9 @@ class FileUploadTool extends BaseBrowserToolExecutor {
 
   // All debugger attach/detach is centrally managed by cdpSessionManager
 
-  private async uploadPreparedFiles(
+  private async setInputFile(
     args: Pick<FileUploadToolParams, 'selector' | 'multiple' | 'tabId' | 'windowId'>,
-    files: string[],
+    source: string | RemoteUpload,
     signal?: AbortSignal,
   ): Promise<ToolResult> {
     const { selector, tabId: targetTabId, windowId } = args;
@@ -237,28 +219,36 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     const tabId = tab.id;
 
     await cdpSessionManager.withSession(tabId, 'file-upload', async () => {
-      await cdpSessionManager.sendCommand(tabId, 'DOM.enable', {});
-      await cdpSessionManager.sendCommand(tabId, 'Runtime.enable', {});
+      await cdpSessionManager.sendCommand(tabId, 'DOM.enable', {}, signal);
+      await cdpSessionManager.sendCommand(tabId, 'Runtime.enable', {}, signal);
 
       const { root } = (await cdpSessionManager.sendCommand(tabId, 'DOM.getDocument', {
         // DOM.querySelector already searches descendants from this root. Do not
         // materialize an attacker-controlled full DOM in the extension process.
         depth: 0,
         pierce: true,
-      })) as { root: { nodeId: number } };
+      }, signal)) as { root: { nodeId: number } };
 
       const { nodeId } = (await cdpSessionManager.sendCommand(tabId, 'DOM.querySelector', {
         nodeId: root.nodeId,
         selector,
-      })) as { nodeId: number };
+      }, signal)) as { nodeId: number };
 
       if (!nodeId || nodeId === 0) {
         throw new Error(`Element with selector "${selector}" not found`);
       }
 
+      // Resolve the input in an isolated world before downloading. Its objectId belongs to
+      // this document and cannot be reused by a replacement page during a slow download.
+      const { frameTree } = await cdpSessionManager.sendCommand<{ frameTree: { frame: { id: string } } }>(
+        tabId, 'Page.getFrameTree', {}, signal,
+      );
+      const { executionContextId } = await cdpSessionManager.sendCommand<{ executionContextId: number }>(
+        tabId, 'Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: 'webpage-mcp-upload' }, signal,
+      );
       const { object } = (await cdpSessionManager.sendCommand(tabId, 'DOM.resolveNode', {
-        nodeId,
-      })) as { object?: { objectId?: string } };
+        nodeId, executionContextId,
+      }, signal)) as { object?: { objectId?: string } };
       const objectId = object?.objectId;
       if (!objectId) {
         throw new Error(`Unable to resolve file input for selector "${selector}"`);
@@ -272,6 +262,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
             objectId,
             functionDeclaration: `function () {
               return {
+                url: this.ownerDocument.URL,
                 isInput: this instanceof HTMLInputElement,
                 isFileInput:
                   this instanceof HTMLInputElement &&
@@ -279,9 +270,9 @@ class FileUploadTool extends BaseBrowserToolExecutor {
               };
             }`,
             returnByValue: true,
-          },
+          }, signal,
         )) as {
-          result?: { value?: { isInput?: boolean; isFileInput?: boolean } };
+          result?: { value?: { url?: string; isInput?: boolean; isFileInput?: boolean } };
         };
         if (!validation.result?.value?.isInput) {
           throw new Error(`Element with selector "${selector}" is not an input element`);
@@ -292,19 +283,36 @@ class FileUploadTool extends BaseBrowserToolExecutor {
           );
         }
 
-        await cdpSessionManager.sendCommand(tabId, 'DOM.setFileInputFiles', {
-          nodeId,
-          files,
-        }, signal);
-
-        await cdpSessionManager.sendCommand(tabId, 'Runtime.callFunctionOn', {
-          objectId,
-          functionDeclaration: `function () {
-            this.dispatchEvent(new Event('change', { bubbles: true }));
-            return true;
-          }`,
-          returnByValue: true,
-        }, signal);
+        if (validation.result.value.url !== tab.url) {
+          throw new Error('The upload target changed before the file was selected');
+        }
+        if (typeof source === 'string') {
+          await cdpSessionManager.sendCommand(tabId, 'DOM.setFileInputFiles', { objectId, files: [source] }, signal);
+        } else {
+          const file = await this.resolveFilePayload(source);
+          // A native temporary path would disappear while the page still holds its lazy File.
+          // Give the form a browser-owned File so subsequent reads and submissions remain valid.
+          const selected = await cdpSessionManager.sendCommand<{ result?: { value?: boolean } }>(
+            tabId, 'Runtime.callFunctionOn', {
+              objectId,
+              functionDeclaration: `function (encoded, name, mimeType) {
+                if (!this.isConnected || this.type !== 'file') return false;
+                const binary = atob(encoded);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                const transfer = new DataTransfer();
+                transfer.items.add(new File([bytes], name, { type: mimeType }));
+                this.files = transfer.files;
+                this.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+                this.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+              }`,
+              arguments: [file.base64Data, source.fileName, file.mimeType].map(value => ({ value })),
+              returnByValue: true,
+            }, signal,
+          );
+          if (selected.result?.value !== true) throw new Error('Unable to set the file on the selected input');
+        }
       } finally {
         await cdpSessionManager
           .sendCommand(tabId, 'Runtime.releaseObject', { objectId })
@@ -319,11 +327,9 @@ class FileUploadTool extends BaseBrowserToolExecutor {
           text: JSON.stringify({
             success: true,
             message: 'File(s) uploaded successfully',
-            files: files
-              .map((file) => toDownloadDisplayName(file))
-              .filter((file): file is string => typeof file === 'string' && file.length > 0),
+            files: [typeof source === 'string' ? toDownloadDisplayName(source) : source.fileName],
             selector,
-            fileCount: files.length,
+            fileCount: 1,
             pathRedacted: true,
           }),
         },
@@ -332,105 +338,16 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     };
   }
 
-  /**
-   * Prepare file from URL or base64 data using native messaging host
-   */
-  private async prepareFileFromRemote(options: {
-    fileUrl?: string;
-    base64Data?: string;
-    fileName: string;
-  }): Promise<string | null> {
-    const prepared = await this.resolveFilePayload(options);
-    if (!prepared) {
-      return null;
-    }
-
-    const { base64Data, fileName } = prepared;
-
-    return new Promise((resolve) => {
-      const requestId = `file-upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      let settled = false;
-
-      const finish = (filePath: string | null) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimeout(timeout);
-        chrome.runtime.onMessage.removeListener(handleMessage);
-        resolve(filePath);
-      };
-
-      const handleMessage = (message: any) => {
-        if (
-          message.type === 'file_operation_response' &&
-          message.responseToRequestId === requestId
-        ) {
-          if (message.payload?.success && message.payload?.filePath) {
-            finish(message.payload.filePath);
-          } else {
-            console.error(
-              'Native host failed to prepare file:',
-              message.error || message.payload?.error,
-            );
-            finish(null);
-          }
-        }
-      };
-
-      const timeout = setTimeout(() => {
-        console.error('File preparation request timed out');
-        finish(null);
-      }, 30000); // 30 second timeout
-
-      // Add listener
-      chrome.runtime.onMessage.addListener(handleMessage);
-
-      // Send message to background script to forward to native host
-      chrome.runtime
-        .sendMessage({
-          type: 'forward_to_native',
-          message: {
-            type: 'file_operation',
-            requestId: requestId,
-            payload: {
-              action: 'prepareFile',
-              base64Data,
-              fileName,
-            },
-          },
-        })
-        .catch((error) => {
-          console.error(
-            'Error sending message to background:',
-            error instanceof Error ? error.message : String(error),
-          );
-          finish(null);
-        });
-    });
-  }
-
-  private async resolveFilePayload(options: {
-    fileUrl?: string;
-    base64Data?: string;
-    fileName: string;
-  }): Promise<{ base64Data: string; fileName: string } | null> {
-    const { fileUrl, base64Data, fileName } = options;
+  private async resolveFilePayload(options: RemoteUpload): Promise<{ base64Data: string; mimeType: string }> {
+    const { fileUrl, base64Data } = options;
     if (base64Data) {
-      if (
-        base64Data.length > MAX_BASE64_ENCODED_CHARACTERS + 4096 ||
-        estimateBase64DecodedBytes(base64Data) > MAX_FILE_UPLOAD_BYTES
-      ) {
-        throw new Error(`Upload file exceeds the ${formatByteLimit(MAX_FILE_UPLOAD_BYTES)} limit.`);
-      }
+      const prefix = /^data:([^;,]*)(?:;[^,]*)?;base64,/i.exec(base64Data);
       return {
-        base64Data,
-        fileName: fileName || 'uploaded-file',
+        base64Data: base64Data.slice(prefix?.[0].length ?? 0).replace(/-/g, '+').replace(/_/g, '/'),
+        mimeType: prefix?.[1] || '',
       };
     }
-    if (!fileUrl) {
-      return null;
-    }
+    if (!fileUrl) throw new Error('A file URL or Base64 payload is required');
 
     try {
       const controller = new AbortController();
@@ -465,64 +382,13 @@ class FileUploadTool extends BaseBrowserToolExecutor {
         controller.abort();
       }
       const encoded = this.arrayBufferToBase64(arrayBuffer);
-      const normalizedName = fileName || this.inferFileNameFromUrl(fileUrl);
-      return {
-        base64Data: encoded,
-        fileName: normalizedName,
-      };
+      return { base64Data: encoded, mimeType: response.headers.get('content-type')?.split(';')[0].trim() || '' };
     } catch (error) {
       console.error(
         'Failed to fetch file URL for upload:',
         error instanceof Error ? error.message : String(error),
       );
       throw error;
-    }
-  }
-
-  private async cleanupPreparedRemoteFile(filePath: string): Promise<void> {
-    const requestId = `file-cleanup-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-
-    try {
-      await new Promise<void>((resolve) => {
-        let settled = false;
-
-        const finish = () => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          clearTimeout(timeout);
-          chrome.runtime.onMessage.removeListener(handleMessage);
-          resolve();
-        };
-
-        const handleMessage = (message: any) => {
-          if (
-            message.type === 'file_operation_response' &&
-            message.responseToRequestId === requestId
-          ) {
-            finish();
-          }
-        };
-
-        const timeout = setTimeout(finish, 10000);
-        chrome.runtime.onMessage.addListener(handleMessage);
-        chrome.runtime
-          .sendMessage({
-            type: 'forward_to_native',
-            message: {
-              type: 'file_operation',
-              requestId,
-              payload: {
-                action: 'cleanupFile',
-                filePath,
-              },
-            },
-          })
-          .catch(finish);
-      });
-    } catch {
-      // Cleanup is best-effort and must not replace the original upload result.
     }
   }
 
@@ -576,20 +442,6 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     }
 
     return btoa(binary);
-  }
-
-  private inferFileNameFromUrl(url: string): string {
-    try {
-      const parsed = new URL(url);
-      const raw = parsed.pathname.split('/').pop() || '';
-      const decoded = decodeURIComponent(raw).trim();
-      if (decoded) {
-        return decoded;
-      }
-    } catch {
-      // Fall through to default filename
-    }
-    return 'uploaded-file';
   }
 }
 

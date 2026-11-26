@@ -3,6 +3,7 @@ import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
 import { AGENT_STREAM_LIMITS } from "@/common/agent-stream-boundaries";
 
 const nativeHostMocks = vi.hoisted(() => ({
+  ensureNativeConnected: vi.fn(async () => true),
   requestAgentRpcFetch: vi.fn(),
   subscribeAgentStream: vi.fn(),
   unsubscribeAgentStream: vi.fn(),
@@ -87,7 +88,8 @@ describe("Quick Panel Agent stream authorization", () => {
       ),
     ).toBe(true);
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
-    await vi.waitFor(() => expect(listeners).toHaveLength(2));
+    await vi.waitFor(() => expect(nativeHostMocks.subscribeAgentStream).toHaveBeenCalled());
+    const { relayNativeAgentStreamEvent } = await import("@/entrypoints/background/agent-stream-events");
     const requestId = sendResponse.mock.calls[0]?.[0]?.requestId;
     const subscriptionId = `quick-panel-${requestId}`;
     const eventMessage = {
@@ -109,30 +111,20 @@ describe("Quick Panel Agent stream authorization", () => {
       },
     };
 
-    listeners[1](eventMessage, contentSender, vi.fn());
+    listeners.forEach((listener) => listener(eventMessage, contentSender, vi.fn()));
     expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
 
-    listeners[1](eventMessage, { id: chrome.runtime.id }, vi.fn());
+    relayNativeAgentStreamEvent(eventMessage.payload);
     expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
       7,
       expect.objectContaining({ requestId }),
       { frameId: 0, documentId: "document-a" },
     );
 
-    listeners[1](
-      {
-        ...eventMessage,
-        payload: {
-          subscriptionId,
-          event: {
-            type: "status",
-            data: { sessionId: "session-1", requestId, status: "completed" },
-          },
-        },
-      },
-      { id: chrome.runtime.id },
-      vi.fn(),
-    );
+    relayNativeAgentStreamEvent({
+      subscriptionId,
+      event: { type: "status", data: { sessionId: "session-1", requestId, status: "completed" } },
+    });
   });
 
   it("terminates a request at the cumulative stream event limit", async () => {
@@ -152,7 +144,8 @@ describe("Quick Panel Agent stream authorization", () => {
       contentSender,
       sendResponse,
     );
-    await vi.waitFor(() => expect(listeners).toHaveLength(2));
+    await vi.waitFor(() => expect(nativeHostMocks.subscribeAgentStream).toHaveBeenCalled());
+    const { relayNativeAgentStreamEvent } = await import("@/entrypoints/background/agent-stream-events");
     const requestId = sendResponse.mock.calls[0]?.[0]?.requestId;
     const subscriptionId = `quick-panel-${requestId}`;
     const eventMessage = {
@@ -171,7 +164,7 @@ describe("Quick Panel Agent stream authorization", () => {
       index <= AGENT_STREAM_LIMITS.maxEventsPerRequest;
       index += 1
     ) {
-      listeners[1](eventMessage, { id: chrome.runtime.id }, vi.fn());
+      relayNativeAgentStreamEvent(eventMessage.payload);
     }
 
     await vi.waitFor(() => {

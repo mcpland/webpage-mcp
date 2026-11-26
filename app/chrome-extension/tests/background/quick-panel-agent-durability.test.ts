@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
 
 const nativeHostMocks = vi.hoisted(() => ({
+  ensureNativeConnected: vi.fn(async () => true),
   requestAgentRpcFetch: vi.fn(),
   subscribeAgentStream: vi.fn(),
   unsubscribeAgentStream: vi.fn(),
@@ -237,8 +238,9 @@ describe("Quick Panel Agent durable lifecycle", () => {
       },
     };
 
-    runtimeListeners[1]!(terminalMessage, { id: chrome.runtime.id }, vi.fn());
-    runtimeListeners[1]!(terminalMessage, { id: chrome.runtime.id }, vi.fn());
+    const { relayNativeAgentStreamEvent } = await import("@/entrypoints/background/agent-stream-events");
+    relayNativeAgentStreamEvent(terminalMessage.payload);
+    relayNativeAgentStreamEvent(terminalMessage.payload);
     await vi.waitFor(() => {
       expect(storageState["agent-request-owners-v1"]).toMatchObject({
         [`quick-panel:${requestId}`]: {
@@ -469,25 +471,16 @@ describe("Quick Panel Agent durable lifecycle", () => {
       sender(),
       sendResponse,
     );
-    await vi.waitFor(() => expect(runtimeListeners).toHaveLength(2));
+    await vi.waitFor(() => expect(nativeHostMocks.subscribeAgentStream).toHaveBeenCalled());
     const requestId = sendResponse.mock.calls[0]![0].requestId as string;
     const subscriptionId = nativeHostMocks.subscribeAgentStream.mock
       .calls[0]![1].subscriptionId as string;
 
-    runtimeListeners[1]!(
-      {
-        type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
-        payload: {
-          subscriptionId,
-          event: {
-            type: "status",
-            data: { sessionId: "session-1", requestId, status: "completed" },
-          },
-        },
-      },
-      { id: chrome.runtime.id },
-      vi.fn(),
-    );
+    const { relayNativeAgentStreamEvent } = await import("@/entrypoints/background/agent-stream-events");
+    relayNativeAgentStreamEvent({
+      subscriptionId,
+      event: { type: "status", data: { sessionId: "session-1", requestId, status: "completed" } },
+    });
 
     await vi.waitFor(() => {
       expect(storageState["agent-request-owners-v1"]).toMatchObject({

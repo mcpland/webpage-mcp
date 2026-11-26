@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
 
 const nativeHostMocks = vi.hoisted(() => ({
+  ensureNativeConnected: vi.fn(async () => true),
   requestAgentRpcFetch: vi.fn(),
   subscribeAgentStream: vi.fn(),
   unsubscribeAgentStream: vi.fn(),
@@ -435,7 +436,7 @@ describe("Quick Panel agent handler", () => {
     });
     expect(
       globalThis.chrome.runtime.onMessage.addListener,
-    ).toHaveBeenCalledTimes(2);
+    ).toHaveBeenCalledOnce();
   });
 
   it("rejects cancellation without valid document-bound authorization", async () => {

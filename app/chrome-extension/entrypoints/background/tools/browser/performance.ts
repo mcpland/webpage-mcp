@@ -1,3 +1,4 @@
+import { requestNativeFile } from '../../native-requests';
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { toPublicDownloadLocation } from '@/entrypoints/background/download-paths';
 import { BaseBrowserToolExecutor } from '../base-browser';
@@ -58,7 +59,7 @@ interface TraceSessionState {
   stopResolver: (value: { completed: boolean }) => void;
   stopPromise: Promise<{ completed: boolean }>;
   traceCompleted: boolean;
-  endRequested: boolean;
+  dataLimitReached: boolean;
   endRequestPromise?: Promise<void>;
   alarmName: string;
   timedStopReason: 'auto_stop' | 'max_duration';
@@ -88,7 +89,7 @@ function createTraceSessionState(
     stopResolver,
     stopPromise,
     traceCompleted: false,
-    endRequested: false,
+    dataLimitReached: false,
     alarmName: `${TRACE_ALARM_PREFIX}${tabId}`,
     timedStopReason,
     truncated: false,
@@ -189,7 +190,8 @@ function markTraceTruncated(state: TraceSessionState, reason: TraceTruncationRea
 }
 
 function collectTraceEvents(tabId: number, state: TraceSessionState, values: any[]): void {
-  if (!state.recording || state.endRequested || sessions.get(tabId) !== state) {
+  // Chrome flushes ReportEvents after Tracing.end and before Tracing.tracingComplete.
+  if (!state.recording || state.dataLimitReached || sessions.get(tabId) !== state) {
     return;
   }
 
@@ -232,6 +234,7 @@ function collectTraceEvents(tabId: number, state: TraceSessionState, values: any
   }
 
   if (limitReason) {
+    state.dataLimitReached = true;
     markTraceTruncated(state, limitReason);
     void requestTraceEnd(tabId, state, limitReason).catch(() => cleanupTraceSession(tabId, state));
   }
@@ -329,62 +332,7 @@ async function saveTraceToNativeTemp(
     const filename = `${filenamePrefix}_${timestamp}.json`;
     const base64 = utf8ToBase64(json);
 
-    const requestId = `trace-temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const timeoutMs = 30000;
-    const resp = await new Promise<any>((resolve, reject) => {
-      let settled = false;
-      const finish = (result: { ok: true; value: any } | { ok: false; error: unknown }) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        chrome.runtime.onMessage.removeListener(listener);
-        if (result.ok) resolve(result.value);
-        else reject(result.error);
-      };
-      const timer = setTimeout(() => {
-        finish({ ok: false, error: new Error('Native temp save timed out') });
-      }, timeoutMs);
-      const listener = (message: any) => {
-        if (
-          message &&
-          message.type === 'file_operation_response' &&
-          message.responseToRequestId === requestId
-        ) {
-          finish({ ok: true, value: message.payload });
-        }
-      };
-      chrome.runtime.onMessage.addListener(listener);
-      let acknowledgement: Promise<any>;
-      try {
-        acknowledgement = chrome.runtime.sendMessage({
-          type: 'forward_to_native',
-          message: {
-            type: 'file_operation',
-            requestId,
-            payload: {
-              action: 'prepareFile',
-              base64Data: base64,
-              fileName: filename,
-            },
-          },
-        });
-      } catch (error) {
-        finish({ ok: false, error });
-        return;
-      }
-      acknowledgement
-        .then((ack) => {
-          if (!ack || ack.success !== true) {
-            finish({
-              ok: false,
-              error: new Error(ack?.error || 'Native host did not accept trace preparation'),
-            });
-          }
-        })
-        .catch((error) => {
-          finish({ ok: false, error });
-        });
-    });
+    const resp = await requestNativeFile({ action: 'prepareFile', base64Data: base64, fileName: filename });
 
     if (resp && resp.success && resp.filePath) {
       return { filename, fullPath: resp.filePath, temporary: true };
@@ -397,47 +345,7 @@ async function saveTraceToNativeTemp(
 
 async function cleanupNativeTempFile(filePath: string): Promise<void> {
   if (!filePath) return;
-  try {
-    const requestId = `trace-clean-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const timeoutMs = 10000;
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        chrome.runtime.onMessage.removeListener(listener);
-        resolve(); // best-effort
-      }, timeoutMs);
-      const listener = (message: any) => {
-        if (
-          message &&
-          message.type === 'file_operation_response' &&
-          message.responseToRequestId === requestId
-        ) {
-          clearTimeout(timer);
-          chrome.runtime.onMessage.removeListener(listener);
-          resolve();
-        }
-      };
-      chrome.runtime.onMessage.addListener(listener);
-      chrome.runtime
-        .sendMessage({
-          type: 'forward_to_native',
-          message: {
-            type: 'file_operation',
-            requestId,
-            payload: {
-              action: 'cleanupFile',
-              filePath,
-            },
-          },
-        })
-        .catch(() => {
-          clearTimeout(timer);
-          chrome.runtime.onMessage.removeListener(listener);
-          resolve();
-        });
-    });
-  } catch {
-    // ignore
-  }
+  await requestNativeFile({ action: 'cleanupFile', filePath }, 10_000).catch(() => {});
 }
 
 function toPublicSavedTraceArtifact(saved?: SavedTraceArtifact): {
@@ -490,7 +398,6 @@ function requestTraceEnd(
     return Promise.resolve();
   }
 
-  session.endRequested = true;
   session.stopReason ||= reason;
   session.endRequestPromise = cdpSessionManager
     .sendCommand(tabId, 'Tracing.end')
@@ -951,40 +858,8 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
         const temporarySavedArtifact =
           result.saved?.temporary === true && result.saved.fullPath === fullPath;
         try {
-          const requestId = `trace-analyze-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-          const timeoutMs = Math.max(10000, Math.min((args as any)?.timeoutMs ?? 60000, 300000));
-          const resp = await new Promise<any>((resolve, reject) => {
-            const timer = setTimeout(() => {
-              chrome.runtime.onMessage.removeListener(listener);
-              reject(new Error('Native trace analysis timed out'));
-            }, timeoutMs);
-            const listener = (message: any) => {
-              if (
-                message &&
-                message.type === 'file_operation_response' &&
-                message.responseToRequestId === requestId
-              ) {
-                clearTimeout(timer);
-                chrome.runtime.onMessage.removeListener(listener);
-                resolve(message.payload);
-              }
-            };
-            chrome.runtime.onMessage.addListener(listener);
-            chrome.runtime
-              .sendMessage({
-                type: 'forward_to_native',
-                message: {
-                  type: 'file_operation',
-                  requestId,
-                  payload: { action: 'analyzeTrace', traceFilePath: fullPath, insightName },
-                },
-              })
-              .catch((err) => {
-                clearTimeout(timer);
-                chrome.runtime.onMessage.removeListener(listener);
-                reject(err);
-              });
-          });
+          const timeoutMs = Math.max(10000, Math.min(args?.timeoutMs ?? 60000, 300000));
+          const resp = await requestNativeFile({ action: 'analyzeTrace', traceFilePath: fullPath, insightName }, timeoutMs);
           if (resp && resp.success) {
             const publicSaved = toPublicSavedTraceArtifact(result.saved);
             if (temporarySavedArtifact) {
@@ -1039,7 +914,7 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
             type: 'text',
             text: JSON.stringify({
               success: true,
-              info: 'Lightweight analysis (no saved file path). Native-side deep analysis unavailable.',
+              info: 'Lightweight analysis. Native-side deep analysis unavailable.',
               requestedInsight: insightName || null,
               url: result.tabUrl,
               startedAt: result.startedAt,

@@ -19,7 +19,8 @@ import {
   isExtensionBackgroundSender,
   isExtensionPageSender,
 } from "@/common/runtime-sender-auth";
-import { sanitizeAgentStreamRelayPayload } from "@/common/agent-stream-boundaries";
+import { relayNativeAgentStreamEvent } from "./agent-stream-events";
+import { nativePort, requestNativeHost, setNativePort, settleNativeResponse } from "./native-requests";
 import {
   NATIVE_HOST,
   STORAGE_KEYS,
@@ -62,7 +63,6 @@ const WORKFLOW_RUNTIME_FEATURE_FLAGS = [
   "workflow_release_readiness",
 ] as const;
 
-let nativePort: chrome.runtime.Port | null = null;
 export const HOST_NAME = NATIVE_HOST.NAME;
 
 // ==================== Reconnect Configuration ====================
@@ -111,14 +111,6 @@ function isTrustedNativeControlSender(
   // sender.tab, so distinguish them by their extension origin instead.
   return isExtensionBackgroundSender(sender) || isExtensionPageSender(sender);
 }
-
-interface PendingNativeRequest {
-  resolve: (payload: any) => void;
-  reject: (reason?: unknown) => void;
-  timeoutId: ReturnType<typeof setTimeout>;
-}
-
-const pendingNativeRequests = new Map<string, PendingNativeRequest>();
 
 interface ServerStatus {
   isRunning: boolean;
@@ -212,14 +204,6 @@ function syncConnectionBadge(): void {
     connected: nativePort !== null,
     serverRunning: currentServerStatus.isRunning,
   });
-}
-
-function makeRequestId(): string {
-  try {
-    return crypto.randomUUID();
-  } catch {
-    return `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  }
 }
 
 function normalizeInstanceId(value: unknown): string {
@@ -645,35 +629,6 @@ async function removeManagedInstance(instanceId: string): Promise<void> {
   broadcastServerInstancesChanged();
 }
 
-async function requestNativeHost(
-  type: string,
-  payload?: unknown,
-  timeoutMs: number = 5000,
-): Promise<any> {
-  const nativeBridgePort = nativePort;
-  if (!nativeBridgePort) {
-    throw new Error("Native host not connected");
-  }
-
-  const requestId = makeRequestId();
-  return await new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      pendingNativeRequests.delete(requestId);
-      reject(new Error(`Native request timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    pendingNativeRequests.set(requestId, { resolve, reject, timeoutId });
-
-    try {
-      nativeBridgePort.postMessage({ type, requestId, payload });
-    } catch (error) {
-      clearTimeout(timeoutId);
-      pendingNativeRequests.delete(requestId);
-      reject(error);
-    }
-  });
-}
-
 async function probeNativeHostReady(
   timeoutMs: number = 3000,
 ): Promise<boolean> {
@@ -766,13 +721,7 @@ export async function unsubscribeAgentStream(
   );
 }
 
-function rejectAllPendingNativeRequests(reason: string): void {
-  for (const [requestId, pending] of pendingNativeRequests.entries()) {
-    clearTimeout(pending.timeoutId);
-    pending.reject(new Error(reason));
-    pendingNativeRequests.delete(requestId);
-  }
-}
+
 
 async function startManagedInstanceOnNative(
   instance: McpServerInstanceConfig,
@@ -1285,7 +1234,7 @@ function handleNativeReconnectAlarmAfterRestore(): void {
  * @param trigger - Description of what triggered this call (for logging)
  * @returns Whether the native host connection is established
  */
-async function ensureNativeConnected(trigger: string): Promise<boolean> {
+export async function ensureNativeConnected(trigger: string): Promise<boolean> {
   // Concurrency protection: only one ensure flow at a time
   if (ensurePromise) return ensurePromise;
 
@@ -1327,8 +1276,7 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
             // Ignore disconnect failures.
           }
         }
-        nativePort = null;
-        rejectAllPendingNativeRequests(
+        setNativePort(null,
           "Native host probe failed on existing connection",
         );
         await markAllServersStopped("native_probe_failed");
@@ -1372,8 +1320,7 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
           // Ignore disconnect failures.
         }
       }
-      nativePort = null;
-      rejectAllPendingNativeRequests("Native host handshake failed");
+      setNativePort(null, "Native host handshake failed");
       await markAllServersStopped("native_handshake_failed");
       scheduleReconnect(`handshake_failed:${trigger}`);
       return false;
@@ -1406,7 +1353,7 @@ export function connectNativeHost(): boolean {
   try {
     lastNativeDisconnectError = null;
     const connectedPort = chrome.runtime.connectNative(HOST_NAME);
-    nativePort = connectedPort;
+    setNativePort(connectedPort);
     // The native messaging Port itself keeps the worker alive. No additional
     // offscreen keepalive is needed while this connection exists.
     markReconnectAttemptInFlight();
@@ -1443,20 +1390,7 @@ export function connectNativeHost(): boolean {
         return;
       }
 
-      if (message?.responseToRequestId) {
-        const requestId = String(message.responseToRequestId);
-        const pending = pendingNativeRequests.get(requestId);
-        if (pending) {
-          clearTimeout(pending.timeoutId);
-          pendingNativeRequests.delete(requestId);
-          if (message.error) {
-            pending.reject(new Error(String(message.error)));
-          } else {
-            pending.resolve(message.payload);
-          }
-          return;
-        }
-      }
+      if (settleNativeResponse(message)) return;
 
       if (message.type === NativeMessageType.CANCEL_REQUEST) {
         const requestId = message.payload?.requestId;
@@ -1642,19 +1576,7 @@ export function connectNativeHost(): boolean {
           },
         });
       } else if (message.type === NativeMessageType.AGENT_STREAM_EVENT) {
-        const payload = sanitizeAgentStreamRelayPayload(message.payload);
-        if (!payload) {
-          console.warn("Ignored invalid or oversized Agent stream event");
-          return;
-        }
-        chrome.runtime
-          .sendMessage({
-            type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
-            payload,
-          })
-          .catch(() => {
-            // ignore when no listeners
-          });
+        relayNativeAgentStreamEvent(message.payload);
       } else if (message.type === NativeMessageType.SERVER_STARTED) {
         const status: McpServerInstanceStatus = {
           instanceId: normalizeInstanceId(message.payload?.instanceId),
@@ -1690,11 +1612,7 @@ export function connectNativeHost(): boolean {
           "Error from native host:",
           message.payload?.message || "Unknown error",
         );
-      } else if (message.type === "file_operation_response") {
-        // Forward file operation response back to the requesting tool
-        chrome.runtime.sendMessage(message).catch(() => {
-          // Ignore if no listeners
-        });
+
       }
     });
 
@@ -1711,10 +1629,9 @@ export function connectNativeHost(): boolean {
         ERROR_MESSAGES.NATIVE_DISCONNECTED,
         chrome.runtime.lastError,
       );
-      nativePort = null;
+      setNativePort(null, "Native host disconnected");
       syncConnectionBadge();
       clearAllSessionContexts();
-      rejectAllPendingNativeRequests("Native host disconnected");
 
       // Mark all known servers as stopped since native host disconnection means servers are down
       void markAllServersStopped("native_port_disconnected");
@@ -1735,7 +1652,7 @@ export function connectNativeHost(): boolean {
       error instanceof Error
         ? error.message
         : ERROR_MESSAGES.NATIVE_CONNECTION_FAILED;
-    nativePort = null;
+    setNativePort(null);
     syncConnectionBadge();
     return false;
   }
@@ -1868,7 +1785,7 @@ export const initNativeHostListener = () => {
           } catch {
             // Ignore
           }
-          nativePort = null;
+          setNativePort(null);
         }
         await markAllServersStopped("manual_disconnect");
       })()
@@ -2189,14 +2106,5 @@ export const initNativeHostListener = () => {
     }
 
     // Forward file operation messages to native host
-    if (message.type === "forward_to_native" && message.message) {
-      if (nativePort) {
-        nativePort.postMessage(message.message);
-        sendResponse({ success: true });
-      } else {
-        sendResponse({ success: false, error: "Native host not connected" });
-      }
-      return true;
-    }
   });
 };
