@@ -1705,17 +1705,21 @@ export const TOOL_SCHEMAS: Tool[] = [
         url: {
           type: "string",
           description:
-            "Close tabs matching this HTTP(S) URL. Can be used instead of tabIds.",
+            "Close tabs with this exact HTTP(S) URL across windows, including path, query and fragment. Asterisks are literal.",
+        },
+        urlPattern: {
+          type: "string",
+          description: "Close all HTTP(S) tabs across windows matching this explicit Chrome match pattern. Use instead of url for wildcard matching.",
         },
         tabId: {
           type: "number",
           description:
-            "Target HTTP(S) tab ID to close when tabIds/url are omitted (default: current active tab).",
+            "Target HTTP(S) tab ID to close when tabIds/url/urlPattern are omitted (default: current active tab).",
         },
         windowId: {
           type: "number",
           description:
-            "Window ID to select the active HTTP(S) tab from when tabId/tabIds/url are omitted.",
+            "Window ID to select the active HTTP(S) tab from when tabId/tabIds/url/urlPattern are omitted.",
         },
       },
       required: [],

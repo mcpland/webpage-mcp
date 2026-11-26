@@ -1,3 +1,4 @@
+import { findTabsByExactUrl, findTabsByUrlPattern } from '../../tab-url';
 import { watchLegacyFrameVisits } from './legacy-history';
 import { inspectFrameHistory, watchConsumedPopstate, type FrameHistoryRead } from '@/utils/frame-history';
 import { readWithSignal } from '@/utils/read-with-signal';
@@ -940,6 +941,7 @@ export const navigateTool = new NavigateTool();
 interface CloseTabsToolParams {
   tabIds?: number[];
   url?: string;
+  urlPattern?: string;
   tabId?: number;
   windowId?: number;
 }
@@ -951,58 +953,31 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.CLOSE_TABS;
 
   async execute(args: CloseTabsToolParams): Promise<ToolResult> {
-    const { tabIds, url, tabId, windowId } = args;
-    let urlPattern = url;
-
+    const { tabIds, url, urlPattern, tabId, windowId } = args;
     try {
-      // If URL is provided, close all tabs matching that URL
-      if (urlPattern) {
-        console.log(`Searching for tabs with URL: ${url}`);
-        if (hasDisallowedPublicUrlScheme(urlPattern)) {
-          return createErrorResponse(CLOSE_TABS_PUBLIC_PAGE_ERROR);
+      if (url !== undefined || urlPattern !== undefined) {
+        if (url !== undefined && urlPattern !== undefined) {
+          return createErrorResponse('Specify only one of url and urlPattern');
         }
-        try {
-          // Build a proper Chrome match pattern from a concrete URL.
-          // If caller already provided a match pattern with '*', use as-is.
-          if (!urlPattern.includes('*')) {
-            // Ignore search/hash; match by origin + pathname prefix.
-            // Use URL to normalize; fallback to simple suffixing when parsing fails.
-            try {
-              const u = new URL(urlPattern);
-              const basePath = u.pathname || '/';
-              const pathWithWildcard = basePath.endsWith('/')
-                ? `${basePath}*`
-                : `${basePath}/*`;
-              urlPattern = `${u.protocol}//${u.host}${pathWithWildcard}`;
-            } catch {
-              // Not a fully-qualified URL; ensure it ends with wildcard
-              urlPattern = urlPattern.endsWith('/')
-                ? `${urlPattern}*`
-                : `${urlPattern}/*`;
-            }
+
+        let tabs: chrome.tabs.Tab[];
+        if (url !== undefined) {
+          if (typeof url !== 'string' || !/^https?:\/\//i.test(url.trim())) {
+            return createErrorResponse(CLOSE_TABS_PUBLIC_PAGE_ERROR);
           }
-        } catch {
-          // Best-effort: ensure we have some wildcard
-          urlPattern = urlPattern.endsWith('*')
-            ? urlPattern
-            : urlPattern.endsWith('/')
-              ? `${urlPattern}*`
-              : `${urlPattern}/*`;
+          tabs = await findTabsByExactUrl(new URL(url));
+        } else {
+          tabs = await findTabsByUrlPattern(urlPattern);
         }
 
-        const tabs = (await chrome.tabs.query({ url: urlPattern })).filter(
-          (tab) => !hasDisallowedPublicUrlScheme(String(tab.url || '')),
-        );
-
-        if (!tabs || tabs.length === 0) {
-          console.log(`No tabs found with URL pattern: ${urlPattern}`);
+        if (!tabs.length) {
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify({
                   success: false,
-                  message: `No tabs found with URL pattern: ${urlPattern}`,
+                  message: `No tabs found matching ${url ?? urlPattern}`,
                   closedCount: 0,
                 }),
               },
@@ -1011,9 +986,6 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           };
         }
 
-        console.log(
-          `Found ${tabs.length} tabs with URL pattern: ${urlPattern}`,
-        );
         const tabIdsToClose = tabs
           .map((tab) => tab.id)
           .filter((id): id is number => id !== undefined);
@@ -1030,7 +1002,7 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
               type: 'text',
               text: JSON.stringify({
                 success: true,
-                message: `Closed ${tabIdsToClose.length} tabs with URL: ${url}`,
+                message: `Closed ${tabIdsToClose.length} tabs matching ${url ?? urlPattern}`,
                 closedCount: tabIdsToClose.length,
                 closedTabIds: tabIdsToClose,
               }),

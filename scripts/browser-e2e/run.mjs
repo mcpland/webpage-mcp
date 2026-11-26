@@ -467,6 +467,23 @@ const scenarios = {
     );
   },
 
+  async "close-tabs-exact-url"(t) {
+    const root = await t.open("/");
+    const draft = await t.call("chrome_navigate", {
+      url: t.base + "/form?document=other#draft",
+      openMode: "new_window",
+    });
+    const draftId = draft.json?.tabs?.[0]?.tabId;
+    assert.equal(typeof draftId, "number", draft.text);
+    const fill = await t.call("chrome_fill_or_select", {
+      tabId: draftId, selector: "#email", value: "unsaved draft",
+    });
+    assert.ok(fill.ok, fill.text);
+    const closed = await t.call("chrome_close_tabs", { url: t.base + "/" });
+    assert.deepEqual(closed.json?.closedTabIds, [root], closed.text);
+    assert.equal(await t.value(draftId, "#email"), "unsaved draft");
+  },
+
   async "switch-tab-by-url-or-title"(t) {
     await t.open("/simple");
     await t.open("/form");

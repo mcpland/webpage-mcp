@@ -541,6 +541,7 @@ export interface SwitchTabParams {
 export interface CloseTabParams {
   tabIds?: ReadonlyArray<number>;
   url?: Resolvable<string>;
+  urlPattern?: Resolvable<string>;
 }
 
 export interface HandleDownloadParams {

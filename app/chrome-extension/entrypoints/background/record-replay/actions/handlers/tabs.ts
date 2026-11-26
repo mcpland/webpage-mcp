@@ -8,6 +8,7 @@
  * - handleDownload: Monitor and capture download information
  */
 
+import { findTabsByExactUrl, findTabsByUrlPattern } from '../../../tab-url';
 import { toPublicDownloadLocation } from '@/entrypoints/background/download-paths';
 import {
   enforcesPublicPageRestrictions,
@@ -254,6 +255,7 @@ export const closeTabHandler: ActionHandler<'closeTab'> = {
     if (action.params.tabIds && action.params.tabIds.length > 0) {
       return `Close ${action.params.tabIds.length} tab(s)`;
     }
+    if (action.params.urlPattern !== undefined) return 'Close tabs matching URL pattern';
     if (action.params.url !== undefined) {
       return 'Close tab (by URL)';
     }
@@ -266,26 +268,34 @@ export const closeTabHandler: ActionHandler<'closeTab'> = {
     try {
       let tabIds: number[] = [];
 
+      if (params.url !== undefined && params.urlPattern !== undefined) {
+        return failed('VALIDATION_ERROR', 'Specify only one of url and urlPattern');
+      }
       if (params.tabIds && params.tabIds.length > 0) {
         // Close specific tabs
         tabIds = [...params.tabIds];
+      } else if (params.urlPattern !== undefined) {
+        const pattern = tryResolveString(params.urlPattern, ctx.vars);
+        if (!pattern.ok) return failed('VALIDATION_ERROR', pattern.error);
+        const tabs = await findTabsByUrlPattern(pattern.value);
+        tabIds = tabs.flatMap((tab) => typeof tab.id === 'number' ? [tab.id] : []);
       } else if (params.url !== undefined) {
         // Find and close tabs by URL
         const urlResult = tryResolveString(params.url, ctx.vars);
         if (!urlResult.ok) {
           return failed('VALIDATION_ERROR', `Failed to resolve URL: ${urlResult.error}`);
         }
-        const urlPattern = urlResult.value.trim().toLowerCase();
-
-        // Empty pattern is invalid
-        if (!urlPattern) {
-          return failed('VALIDATION_ERROR', 'URL pattern cannot be empty');
+        let target: URL;
+        try {
+          target = new URL(urlResult.value);
+        } catch {
+          return failed('VALIDATION_ERROR', 'Use an exact absolute URL, or urlPattern with an HTTP(S) Chrome match pattern');
         }
-
-        const tabs = await chrome.tabs.query({});
-        tabIds = tabs
-          .filter((tab) => tab.url && tab.url.toLowerCase().includes(urlPattern) && tab.id)
-          .map((tab) => tab.id!);
+        if (enforcesPublicPageRestrictions(ctx.execution) && !isAllowedPublicFlowTabUrl(target.href)) {
+          return failed('VALIDATION_ERROR', 'Only HTTP(S) tabs can be closed by URL in a public workflow');
+        }
+        const tabs = await findTabsByExactUrl(target);
+        tabIds = tabs.flatMap((tab) => typeof tab.id === 'number' ? [tab.id] : []);
       } else {
         // Close current tab
         if (typeof ctx.tabId === 'number') {

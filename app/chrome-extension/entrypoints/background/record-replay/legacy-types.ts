@@ -234,6 +234,7 @@ export interface StepCloseTab extends StepBase {
   type: 'closeTab';
   tabIds?: number[];
   url?: string;
+  urlPattern?: string;
 }
 
 export interface StepNavigate extends StepBase {

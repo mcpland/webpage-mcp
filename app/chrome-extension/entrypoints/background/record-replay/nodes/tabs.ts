@@ -88,7 +88,8 @@ export const closeTabNode: NodeRuntime<StepCloseTab> = {
     const args: any = {};
     if (Array.isArray(s.tabIds) && s.tabIds.length) args.tabIds = s.tabIds;
     if (s.url) args.url = s.url;
-    if (!args.tabIds && !args.url && typeof ctx.tabId === 'number') args.tabId = ctx.tabId;
+    if (s.urlPattern !== undefined) args.urlPattern = s.urlPattern;
+    if (!args.tabIds && !args.url && args.urlPattern === undefined && typeof ctx.tabId === 'number') args.tabId = ctx.tabId;
     const res = await handleCallTool({ name: TOOL_NAMES.BROWSER.CLOSE_TABS, args });
     if ((res as any).isError) throw new Error('closeTab failed');
     if (

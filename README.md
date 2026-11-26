@@ -498,7 +498,7 @@ Important:
 | `chrome_bookmark_add`              | Add a new bookmark                                                                        |
 | `chrome_bookmark_delete`           | Delete a bookmark                                                                         |
 | `chrome_switch_tab`                | Switch to a specific tab                                                                  |
-| `chrome_close_tabs`                | Close one or more tabs                                                                    |
+| `chrome_close_tabs`                | Close tabs by ID, exact URL, or explicit HTTP(S) Chrome match pattern                     |
 | `chrome_upload_file`               | Upload files to web forms via CDP                                                         |
 | `chrome_handle_dialog`             | Handle JavaScript dialogs (alert/confirm/prompt)                                          |
 | `chrome_handle_download`           | Wait for and retrieve download details                                                    |
@@ -507,6 +507,8 @@ Important:
 | `performance_start_trace`          | Start a performance trace recording                                                       |
 | `performance_stop_trace`           | Stop the active performance trace                                                         |
 | `performance_analyze_insight`      | Get a lightweight summary of the last recorded trace                                      |
+
+For `chrome_close_tabs` and recorded `closeTab` steps, `url` matches the full address, including the query and fragment. To migrate a saved workflow that intentionally closed several pages by URL prefix, use an explicit match pattern such as `"urlPattern": "https://example.com/reports/*"`.
 
 ## Additional Capabilities
 
