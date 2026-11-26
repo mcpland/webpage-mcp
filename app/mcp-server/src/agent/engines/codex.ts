@@ -436,6 +436,10 @@ interface TodoListItem {
   index: number;
 }
 
+function quoteTomlString(value: string): string {
+  return JSON.stringify(value).split(String.fromCharCode(127)).join('\\u007f');
+}
+
 /**
  * Build the CLI arguments that enforce the configured Codex sandbox.
  *
@@ -450,7 +454,7 @@ export function buildCodexSandboxArgs(
     return ['--dangerously-bypass-approvals-and-sandbox'];
   }
 
-  return ['--sandbox', config.sandboxMode, '--ask-for-approval', 'never'];
+  return ['--sandbox', config.sandboxMode, '-c', 'approval_policy="never"'];
 }
 
 export function buildCodexSpawnSpec(
@@ -492,7 +496,7 @@ export function resolveCodexConfig(
  */
 export class CodexEngine implements AgentEngine {
   public readonly name = 'codex' as const;
-  public readonly supportsMcp = false;
+  public readonly supportsMcp = true;
   constructor(public readonly instanceId = DEFAULT_MCP_INSTANCE_ID) {}
 
   async initializeAndRun(
@@ -598,19 +602,21 @@ export class CodexEngine implements AgentEngine {
     // Inject local Webpage MCP server via stdio bridge (no HTTP dependency)
     if (enableWebpageMcp) {
       const stdioConfig = resolveWebpageMcpStdioConfig(this.instanceId);
-      args.push('-c', 'mcp_servers.webpage_mcp.type="stdio"');
       args.push(
         '-c',
-        `mcp_servers.webpage_mcp.command=${JSON.stringify(stdioConfig.command)}`,
+        `mcp_servers.webpage_mcp.command=${quoteTomlString(stdioConfig.command)}`,
       );
       args.push(
         '-c',
-        `mcp_servers.webpage_mcp.args=${JSON.stringify(stdioConfig.args)}`,
+        `mcp_servers.webpage_mcp.args=[${stdioConfig.args.map(quoteTomlString).join(', ')}]`,
       );
       if (stdioConfig.env && Object.keys(stdioConfig.env).length > 0) {
+        const tomlEntries = Object.entries(stdioConfig.env).map(
+          ([key, value]) => `${quoteTomlString(key)} = ${quoteTomlString(value)}`,
+        );
         args.push(
           '-c',
-          `mcp_servers.webpage_mcp.env=${JSON.stringify(stdioConfig.env)}`,
+          `mcp_servers.webpage_mcp.env={ ${tomlEntries.join(', ')} }`,
         );
       }
       console.error(

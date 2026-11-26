@@ -161,8 +161,8 @@ describe('buildCodexSandboxArgs', () => {
       expect(args).toEqual([
         '--sandbox',
         sandboxMode,
-        '--ask-for-approval',
-        'never',
+        '-c',
+        'approval_policy="never"',
       ]);
       expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     },
@@ -194,8 +194,8 @@ describe('resolveCodexConfig', () => {
     expect(buildCodexSandboxArgs(resolved)).toEqual([
       '--sandbox',
       'workspace-write',
-      '--ask-for-approval',
-      'never',
+      '-c',
+      'approval_policy="never"',
     ]);
   });
 });
@@ -395,6 +395,12 @@ describe('CodexEngine prompt transport', () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const [, args, spawnOptions] = spawnMock.mock.calls[0];
     expect(args.at(-1)).toBe('-');
+    expect(engine.supportsMcp).toBe(true);
+    expect(args).toContain('approval_policy="never"');
+    expect(args).not.toContain('--ask-for-approval');
+    expect(args.find((arg: string) => arg.startsWith('mcp_servers.webpage_mcp.env='))).toContain(
+      '"WEBPAGE_MCP_INSTANCE_ID" = "test-instance"',
+    );
     expect(args.some((arg: string) => arg.includes('private prompt'))).toBe(false);
     expect(spawnOptions).toEqual(
       expect.objectContaining({

@@ -122,7 +122,7 @@ describe("Server agent RPC runtime", () => {
     expect(
       (response.json as { engines?: Array<{ name: string }> }).engines,
     ).toEqual([
-      { name: "codex", supportsMcp: false },
+      { name: "codex", supportsMcp: true },
       { name: "claude", supportsMcp: true },
     ]);
   });
