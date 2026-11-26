@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  currentClaudeExecutableId,
+  getMissingStableRuntimeDependencies,
   getRuntimeNodeModulesPathFile,
   installStableRuntimeDependencies,
   RUNTIME_REQUIRED_MODULE_IDS,
@@ -136,7 +138,7 @@ describe("stable runtime dependencies", () => {
       expect(isPathInside(canonicalNodeModulesDir, resolvedPath)).toBe(true);
     }
 
-    const sqliteSmoke = spawnSync(
+    const runtimeSmoke = spawnSync(
       process.execPath,
       [
         "--input-type=commonjs",
@@ -144,22 +146,41 @@ describe("stable runtime dependencies", () => {
         [
           'const { createRequire } = require("node:module");',
           'const path = require("node:path");',
-          'const runtimeRequire = createRequire(path.join(process.argv[1], ".sqlite-smoke.cjs"));',
+          'const runtimeRequire = createRequire(path.join(process.argv[1], ".runtime-smoke.cjs"));',
           'const BetterSqlite3 = runtimeRequire("better-sqlite3");',
           'const database = new BetterSqlite3(":memory:");',
           "database.close();",
+          'const { pathToFileURL } = require("node:url");',
+          'const sdk = runtimeRequire.resolve("@anthropic-ai/claude-agent-sdk");',
+          "async function checkSdk() {",
+          "  const { query } = await import(pathToFileURL(sdk).href);",
+          "  const stop = new AbortController();",
+          "  const prompt = (async function* () { await new Promise(r => stop.signal.addEventListener('abort', r, { once: true })); })();",
+          "  const session = query({ prompt, options: { cwd: process.cwd(), settings: {}, settingSources: [], tools: [], persistSession: false } });",
+          "  try { await session.initializationResult(); } finally { stop.abort(); session.close(); }",
+          "}",
+          "checkSdk().catch(e => { console.error(e.message); process.exitCode = 1; });",
         ].join("\n"),
         configuredNodeModulesDir,
       ],
       {
+        cwd: temporaryRoot,
+        env: {
+          ...process.env,
+          HOME: temporaryRoot,
+          USERPROFILE: temporaryRoot,
+          CLAUDE_CONFIG_DIR: path.join(temporaryRoot, ".claude"),
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+          ANTHROPIC_BASE_URL: "http://127.0.0.1:1",
+        },
         encoding: "utf8",
         timeout: 30_000,
         windowsHide: true,
       },
     );
-    expect(sqliteSmoke.error).toBeUndefined();
-    expect(sqliteSmoke.signal).toBeNull();
-    expect(sqliteSmoke.status, sqliteSmoke.stderr).toBe(0);
+    expect(runtimeSmoke.error).toBeUndefined();
+    expect(runtimeSmoke.signal).toBeNull();
+    expect(runtimeSmoke.status, runtimeSmoke.stderr).toBe(0);
 
     const recovered = await installStableRuntimeDependencies(
       runtimeDistDir,
@@ -255,6 +276,23 @@ describe("stable runtime dependencies", () => {
       { version: "2.0.0" },
       { "index.js": 'module.exports = "drizzle";\n' },
     );
+    const executableId = currentClaudeExecutableId();
+    const platformPackage = executableId?.slice(
+      0,
+      executableId.lastIndexOf("/"),
+    );
+    const sdkRoot = await writeFixturePackage(
+      sourceNodeModulesDir,
+      "@anthropic-ai/claude-agent-sdk",
+      {
+        type: "module",
+        exports: "./sdk.mjs",
+        optionalDependencies: platformPackage
+          ? { [platformPackage]: "1.0.0" }
+          : {},
+      },
+      { "sdk.mjs": "export function query() {}\n" },
+    );
     await writeFixturePackage(
       sourceNodeModulesDir,
       "cross-spawn",
@@ -273,6 +311,20 @@ describe("stable runtime dependencies", () => {
       { exports: { "./v4": "./v4/index.cjs" } },
       { "v4/index.cjs": "module.exports = {};\n" },
     );
+
+    if (executableId && platformPackage) {
+      await expect(
+        installStableRuntimeDependencies(sourceDistDir, runtimeDistDir),
+      ).rejects.toThrow(/Missing or unusable Claude CLI/);
+      const name = path.basename(executableId);
+      const binaryRoot = await writeFixturePackage(
+        path.join(sdkRoot, "node_modules"),
+        platformPackage,
+        {},
+        { [name]: "fixture executable" },
+      );
+      await fs.chmod(path.join(binaryRoot, name), 0o755);
+    }
 
     const concurrentInstalls = await Promise.all([
       installStableRuntimeDependencies(sourceDistDir, runtimeDistDir),
@@ -309,6 +361,14 @@ describe("stable runtime dependencies", () => {
           await fs.realpath(runtimeRequire.resolve(moduleId)),
         ),
       ).toBe(true);
+    }
+    if (executableId) {
+      const sdk = runtimeRequire.resolve("@anthropic-ai/claude-agent-sdk");
+      const binary = createRequire(sdk).resolve(executableId);
+      await fs.unlink(binary);
+      expect(getMissingStableRuntimeDependencies(runtimeDistDir)).toContain(
+        executableId,
+      );
     }
   });
 });

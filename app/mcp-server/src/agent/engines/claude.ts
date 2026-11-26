@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   AGENT_SESSION_MAX_THINKING_TOKENS,
   AGENT_SESSION_MAX_TURNS,
@@ -271,14 +272,10 @@ export class ClaudeEngine implements AgentEngine {
     // Images are passed via temp file paths appended to the prompt string
     let query: (args: { prompt: string; options?: Record<string, unknown> }) => AsyncIterable<any>;
     try {
-      // Dynamic import to avoid hard dependency - install @anthropic-ai/claude-agent-sdk to use this engine
-      // Use string variable to bypass TypeScript module resolution
-      const sdkModuleName = '@anthropic-ai/claude-agent-sdk';
-
-      const sdk = await (Function(
-        'moduleName',
-        'return import(moduleName)',
-      )(sdkModuleName) as Promise<any>);
+      // The stable launcher puts its private dependency generation on NODE_PATH.
+      // Resolve via CommonJS first, then use the absolute file URL to load the ESM SDK.
+      const sdkUrl = pathToFileURL(require.resolve('@anthropic-ai/claude-agent-sdk')).href;
+      const sdk = await import(sdkUrl);
       query = sdk.query;
     } catch (error) {
       const message = redactDiagnosticText(error, DIAGNOSTIC_ERROR_MAX_BYTES);

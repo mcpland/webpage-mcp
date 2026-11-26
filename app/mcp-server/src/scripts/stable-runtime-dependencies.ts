@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 
 export const RUNTIME_NODE_MODULES_PATH_FILE = "node_modules_path.txt";
 export const RUNTIME_REQUIRED_MODULE_IDS = [
+  "@anthropic-ai/claude-agent-sdk",
   "better-sqlite3",
   "cross-spawn",
   "drizzle-orm",
@@ -592,6 +593,51 @@ function readDependencyGenerationMarker(
   }
 }
 
+export function currentClaudeExecutableId(): string | undefined {
+  if (!["arm64", "x64"].includes(process.arch)) return undefined;
+  if (!["darwin", "win32", "linux"].includes(process.platform))
+    return undefined;
+
+  let suffix = `${process.platform}-${process.arch}`;
+  if (process.platform === "linux") {
+    const report = process.report.getReport() as {
+      header?: { glibcVersionRuntime?: string };
+    };
+    if (!report.header?.glibcVersionRuntime) suffix += "-musl";
+  }
+  return `@anthropic-ai/claude-agent-sdk-${suffix}/${process.platform === "win32" ? "claude.exe" : "claude"}`;
+}
+
+function checkClaudeExecutable(
+  sdkPath: string,
+  executableId: string,
+  nodeModulesDir: string,
+): void {
+  try {
+    const executable = fs.realpathSync(
+      createRequire(sdkPath).resolve(executableId),
+    );
+    const stat = fs.statSync(executable);
+    if (
+      !isPathInside(nodeModulesDir, executable) ||
+      !stat.isFile() ||
+      stat.size === 0
+    ) {
+      throw new Error(
+        "Expected a non-empty executable inside the dependency generation",
+      );
+    }
+    fs.accessSync(
+      executable,
+      process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
+    );
+  } catch {
+    throw new Error(
+      `Missing or unusable Claude CLI ${executableId}. Install the SDK platform optional dependency.`,
+    );
+  }
+}
+
 function validateRuntimeDependencies(
   nodeModulesDir: string,
   loadNativeModule: boolean,
@@ -613,6 +659,15 @@ function validateRuntimeDependencies(
         `Runtime dependency ${moduleId} resolved outside the stable runtime: ${resolvedPath}`,
       );
     }
+  }
+
+  const executableId = currentClaudeExecutableId();
+  if (executableId) {
+    checkClaudeExecutable(
+      runtimeRequire.resolve("@anthropic-ai/claude-agent-sdk"),
+      executableId,
+      nodeModulesDir,
+    );
   }
 
   if (loadNativeModule) {
@@ -916,7 +971,7 @@ export function getMissingStableRuntimeDependencies(
 
   try {
     const runtimeRequire = createRequire(entryPath);
-    return RUNTIME_REQUIRED_MODULE_IDS.filter((moduleId) => {
+    const missing: string[] = RUNTIME_REQUIRED_MODULE_IDS.filter((moduleId) => {
       try {
         runtimeRequire.resolve(moduleId, { paths: resolvePaths });
         return false;
@@ -924,6 +979,23 @@ export function getMissingStableRuntimeDependencies(
         return true;
       }
     });
+    const executableId = currentClaudeExecutableId();
+    if (executableId && !missing.includes("@anthropic-ai/claude-agent-sdk")) {
+      try {
+        const sdkPath = runtimeRequire.resolve(
+          "@anthropic-ai/claude-agent-sdk",
+          { paths: resolvePaths },
+        );
+        const generation = resolvePaths.find((root) =>
+          isPathInside(root, sdkPath),
+        );
+        if (!generation) throw new Error("SDK is outside the stable runtime");
+        checkClaudeExecutable(sdkPath, executableId, generation);
+      } catch {
+        missing.push(executableId);
+      }
+    }
+    return missing;
   } catch {
     return [...RUNTIME_REQUIRED_MODULE_IDS];
   }
